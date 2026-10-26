@@ -34,7 +34,9 @@ def test_effort_rejects_zero_negative_and_garbage(text: str) -> None:
         Effort.parse(text)
 
 
-@pytest.mark.parametrize(("minutes", "text"), [(30, "30m"), (90, "1.5h"), (240, "4h"), (100, "100m")])
+@pytest.mark.parametrize(
+    ("minutes", "text"), [(30, "30m"), (90, "1.5h"), (240, "4h"), (100, "100m")]
+)
 def test_effort_renders_canonical_text(minutes: int, text: str) -> None:
     assert Effort(minutes).render() == text
 
@@ -92,7 +94,10 @@ def _task(**changes: object) -> Task:
         ({}, TaskStatus.PROPUESTA),
         ({"scheduled": date(2026, 10, 28)}, TaskStatus.PROGRAMADA),
         ({"state": ExplicitState.BLOQUEADA}, TaskStatus.BLOQUEADA),
-        ({"state": ExplicitState.CONFIRMADA, "scheduled": date(2026, 10, 28)}, TaskStatus.CONFIRMADA),
+        (
+            {"state": ExplicitState.CONFIRMADA, "scheduled": date(2026, 10, 28)},
+            TaskStatus.CONFIRMADA,
+        ),
         ({"checkbox": Checkbox.DONE}, TaskStatus.COMPLETADA),
         ({"checkbox": Checkbox.DONE, "state": ExplicitState.BLOQUEADA}, TaskStatus.COMPLETADA),
         ({"checkbox": Checkbox.CANCELLED}, TaskStatus.CANCELADA),

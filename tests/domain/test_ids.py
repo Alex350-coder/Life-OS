@@ -19,7 +19,8 @@ def test_task_id_accepts_valid_values(value: str) -> None:
 
 
 @pytest.mark.parametrize(
-    "value", ["", "t-7f3k2", "t-7f3k2mm", "x-7f3k2m", "t-7F3K2M", "t-7f3k2o", "t-7f3k21", " t-7f3k2m"]
+    "value",
+    ["", "t-7f3k2", "t-7f3k2mm", "x-7f3k2m", "t-7F3K2M", "t-7f3k2o", "t-7f3k21", " t-7f3k2m"],
 )
 def test_task_id_rejects_invalid_values(value: str) -> None:
     with pytest.raises(ValidationError, match="id"):
