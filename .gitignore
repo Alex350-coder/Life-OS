@@ -1,0 +1,36 @@
+# Secretos y entorno local
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+secrets/
+credentials/
+
+# Python
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# Estado local y logs
+*.db
+*.sqlite
+*.sqlite3
+logs/
+*.log
+
+# Contenido personal de la bóveda (la real vive fuera del repositorio)
+LifeOS-Vault/
+vault-local/
+.obsidian/
+.DS_Store
+Thumbs.db

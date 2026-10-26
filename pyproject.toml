@@ -1,0 +1,57 @@
+[project]
+name = "lifeos"
+version = "0.1.0"
+description = "Life OS: planificación personal con agentes sobre una bóveda de Obsidian."
+authors = [{ name = "Alexander" }]
+requires-python = ">=3.12"
+# Fase 1: solo biblioteca estándar en tiempo de ejecución.
+dependencies = []
+
+[build-system]
+requires = ["uv_build>=0.11.18,<0.12.0"]
+build-backend = "uv_build"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = ["--strict-markers", "--import-mode=importlib"]
+markers = [
+    "unit: pruebas de dominio y reglas puras",
+    "integration: pruebas contra una bóveda temporal en disco",
+    "security: pruebas negativas de controles SEC-xx",
+]
+
+[tool.coverage.run]
+source = ["lifeos"]
+branch = true
+
+[tool.coverage.report]
+fail_under = 80
+show_missing = true
+skip_covered = false
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "PTH", "T20"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["S101"]
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["src", "tests"]
+
+[tool.bandit]
+exclude_dirs = ["tests"]
+
+[dependency-groups]
+dev = [
+    "bandit>=1.9.4",
+    "mypy>=2.4.0",
+    "pytest>=9.1.1",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.17.2",
+]
