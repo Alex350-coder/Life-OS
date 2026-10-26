@@ -8,6 +8,7 @@ import pytest
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.application.tasks import (
     ApplicationError,
+    LocatedTask,
     TaskNotFoundError,
     TaskQuery,
     create_task,
@@ -50,8 +51,8 @@ def seeded(write_note: WriteNote) -> None:
     write_note("_sistema/reglas.md", "- [ ] Regla del sistema [id:: t-666666]\n")
 
 
-def _ids(results: tuple[object, ...]) -> list[str]:
-    return [r.task.id.value for r in results if r.task.id is not None]  # type: ignore[attr-defined]
+def _ids(results: tuple[LocatedTask, ...]) -> list[str]:
+    return [r.task.id.value for r in results if r.task.id is not None]
 
 
 # --- Escaneo e integridad -------------------------------------------------------------------
@@ -75,7 +76,7 @@ def test_scan_reports_parse_problems_and_duplicates(
 
     report = scan(vault)
 
-    assert [(str(p.path), p.problem.index) for p in report.problems] == [("a.md", 0)]
+    assert [(str(p.path), p.line_index) for p in report.problems] == [("a.md", 0)]
     assert len(report.duplicates) == 1
     assert report.duplicates[0].task_id == TaskId("t-777777")
 

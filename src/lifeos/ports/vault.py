@@ -1,17 +1,23 @@
 """Puerto de almacenamiento de la bóveda (ADR-0001) y validación léxica de rutas (SEC-02)."""
 
 import re
+import unicodedata
 from dataclasses import dataclass
 from typing import Protocol
 
 from lifeos.domain.errors import LifeOSError
 
 _RESERVED_NAMES = frozenset(
-    {"con", "prn", "aux", "nul"}
+    {"con", "prn", "aux", "nul", "conin$", "conout$"}
     | {f"com{i}" for i in range(1, 10)}
     | {f"lpt{i}" for i in range(1, 10)}
 )
 _FORBIDDEN_CHARS = re.compile(r'[\\:*?"<>|\x00-\x1f]')
+# Caracteres invisibles o separadores que harían que dos rutas parezcan iguales sin serlo.
+_INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs"})
+MAX_COMPONENT_LENGTH = 255
+MAX_PATH_LENGTH = 1024
+_SHA256_HEX = re.compile(r"[0-9a-f]{64}")
 
 
 class VaultError(LifeOSError):
@@ -46,11 +52,20 @@ class VaultIOError(VaultError):
 def _check_component(raw: str, part: str) -> None:
     if part in {"", ".", ".."}:
         raise PathRejectedError(raw, "componente vacío, '.' o '..'")
+    if part.startswith("."):
+        raise PathRejectedError(raw, "los archivos y carpetas ocultos no son notas")
+    if len(part) > MAX_COMPONENT_LENGTH:
+        raise PathRejectedError(raw, f"componente de más de {MAX_COMPONENT_LENGTH} caracteres")
     if _FORBIDDEN_CHARS.search(part):
         raise PathRejectedError(raw, 'carácter no permitido (\\, :, *, ?, ", <, >, | o control)')
+    if any(c != " " and unicodedata.category(c) in _INVISIBLE_CATEGORIES for c in part):
+        raise PathRejectedError(raw, "contiene caracteres invisibles o separadores especiales")
     if part[-1] in {".", " "}:
         raise PathRejectedError(raw, "un componente no puede terminar en punto o espacio")
-    if part.split(".", 1)[0].lower() in _RESERVED_NAMES:
+    # NFKC convierte variantes visuales (CON de ancho completo, COM con superíndice)
+    # en el nombre reservado real.
+    stem = unicodedata.normalize("NFKC", part.split(".", 1)[0]).lower()
+    if stem in _RESERVED_NAMES:
         raise PathRejectedError(raw, "nombre reservado de Windows")
 
 
@@ -65,6 +80,8 @@ class VaultPath:
             raise PathRejectedError(self.value, "ruta vacía")
         if self.value.startswith("/"):
             raise PathRejectedError(self.value, "ruta absoluta")
+        if len(self.value) > MAX_PATH_LENGTH:
+            raise PathRejectedError(self.value[:40], f"ruta de más de {MAX_PATH_LENGTH} caracteres")
         for part in self.value.split("/"):
             _check_component(self.value, part)
 
@@ -105,6 +122,10 @@ class Version:
     """Huella del contenido leído; permite detectar cambios concurrentes."""
 
     digest: str
+
+    def __post_init__(self) -> None:
+        if not _SHA256_HEX.fullmatch(self.digest):
+            raise ValueError("la versión debe ser un SHA-256 en hexadecimal")
 
 
 @dataclass(frozen=True, slots=True)

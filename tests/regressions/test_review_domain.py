@@ -84,7 +84,7 @@ def test_date_emoji_without_space_is_still_recognized() -> None:
 # --- Saltos de línea: solo \n y \r\n (code-reviewer) ----------------------------------------
 
 
-@pytest.mark.parametrize("separator", ["\x85", "\x0c", " ", "\x1e"])
+@pytest.mark.parametrize("separator", [chr(0x85), chr(0x0C), chr(0x2028), chr(0x1E)])
 def test_unicode_separators_do_not_create_phantom_lines(separator: str) -> None:
     text = f"x{separator}- [ ] fantasma\n"
 

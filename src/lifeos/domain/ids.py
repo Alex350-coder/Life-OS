@@ -5,7 +5,7 @@ import secrets
 from collections.abc import Callable, Collection, Sequence
 from dataclasses import dataclass
 
-from lifeos.domain.errors import ValidationError
+from lifeos.domain.errors import DomainError, ValidationError
 
 ALPHABET = "23456789abcdefghjkmnpqrstvwxyz"
 ID_LENGTH = 6
@@ -13,6 +13,10 @@ DEFAULT_MAX_ATTEMPTS = 20
 _ID_RE = re.compile(rf"t-[{ALPHABET}]{{{ID_LENGTH}}}")
 
 Choice = Callable[[Sequence[str]], str]
+
+
+class IdExhaustedError(DomainError):
+    """No se encontró un id libre tras el número máximo de intentos."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -40,4 +44,4 @@ def new_unique_task_id(
         candidate = new_task_id(choice)
         if candidate not in taken:
             return candidate
-    raise ValidationError("id", len(taken), "no se pudo generar un id único")
+    raise IdExhaustedError(f"no se pudo generar un id único en {max_attempts} intentos")

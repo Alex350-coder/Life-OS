@@ -36,6 +36,26 @@ def _is_link(path: Path) -> bool:
     return path.is_symlink() or path.is_junction()
 
 
+def _is_listable(path: Path) -> bool:
+    # Los enlaces se excluyen por SEC-02; los ocultos (.obsidian, temporales) no son notas.
+    return not path.name.startswith(".") and not _is_link(path)
+
+
+def _raise_walk_error(error: OSError) -> None:
+    raise VaultIOError(f"no se pudo recorrer la bóveda: {error}") from error
+
+
+def _discard(temp: Path | None) -> None:
+    """Borra el temporal sin ocultar el error principal si el borrado también falla."""
+    if temp is None:
+        return
+    try:
+        temp.unlink(missing_ok=True)
+    except OSError:
+        # Queda un `.lifeos-*` huérfano: es inofensivo (oculto y fuera de list_notes).
+        return
+
+
 class FilesystemVault:
     """Implementación de `VaultStore` sobre un directorio local."""
 
@@ -89,15 +109,22 @@ class FilesystemVault:
         if not base.is_dir():
             return ()
         found: list[VaultPath] = []
-        for directory, dirnames, filenames in os.walk(base):
+        # Una carpeta ilegible no se salta en silencio: faltarían tareas e ids ocupados.
+        for directory, dirnames, filenames in os.walk(base, onerror=_raise_walk_error):
             current = Path(directory)
-            dirnames[:] = sorted(d for d in dirnames if not _is_link(current / d))
+            dirnames[:] = sorted(d for d in dirnames if _is_listable(current / d))
             for filename in filenames:
                 candidate = current / filename
-                if filename.endswith(NOTE_SUFFIX) and not _is_link(candidate):
-                    relative = candidate.relative_to(self._root).as_posix()
-                    found.append(VaultPath(relative))
+                if filename.lower().endswith(NOTE_SUFFIX) and _is_listable(candidate):
+                    found.append(self._to_vault_path(candidate))
         return tuple(sorted(found, key=lambda p: p.value))
+
+    def _to_vault_path(self, candidate: Path) -> VaultPath:
+        relative = candidate.relative_to(self._root).as_posix()
+        try:
+            return VaultPath(relative)
+        except PathRejectedError as exc:
+            raise VaultIOError(f"nombre de nota no admitido: {exc.reason}") from exc
 
     # --- Escritura atómica ---------------------------------------------------------------
 
@@ -105,9 +132,10 @@ class FilesystemVault:
         target = self._locate(path)
         data = text.encode("utf-8")
         self._ensure_parent(path, target)
-        fd, temp_name = tempfile.mkstemp(prefix=TEMP_PREFIX, dir=target.parent)
-        temp = Path(temp_name)
+        temp: Path | None = None
         try:
+            fd, temp_name = tempfile.mkstemp(prefix=TEMP_PREFIX, dir=target.parent)
+            temp = Path(temp_name)
             with os.fdopen(fd, "wb") as handle:
                 handle.write(data)
                 handle.flush()
@@ -117,7 +145,7 @@ class FilesystemVault:
         except OSError as exc:
             raise VaultIOError(f"no se pudo escribir {path.value}: {exc}") from exc
         finally:
-            temp.unlink(missing_ok=True)
+            _discard(temp)
         return _version_of(data)
 
     def _ensure_parent(self, path: VaultPath, target: Path) -> None:

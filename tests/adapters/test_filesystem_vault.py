@@ -22,18 +22,6 @@ pytestmark = pytest.mark.integration
 NOTE = VaultPath.parse("01-Universidad/redes.md")
 
 
-@pytest.fixture
-def root(tmp_path: Path) -> Path:
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    return vault
-
-
-@pytest.fixture
-def vault(root: Path) -> FilesystemVault:
-    return FilesystemVault(root)
-
-
 def _leftover_temp_files(root: Path) -> list[Path]:
     return [p for p in root.rglob("*") if p.name.startswith(".lifeos-")]
 

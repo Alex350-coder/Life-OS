@@ -3,7 +3,13 @@
 import pytest
 
 from lifeos.domain.errors import ValidationError
-from lifeos.domain.ids import ALPHABET, TaskId, new_task_id, new_unique_task_id
+from lifeos.domain.ids import (
+    ALPHABET,
+    IdExhaustedError,
+    TaskId,
+    new_task_id,
+    new_unique_task_id,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -46,5 +52,5 @@ def test_new_unique_task_id_retries_on_collision() -> None:
 
 def test_new_unique_task_id_gives_up_after_max_attempts() -> None:
     taken = {TaskId("t-222222")}
-    with pytest.raises(ValidationError, match="único"):
+    with pytest.raises(IdExhaustedError, match="único"):
         new_unique_task_id(taken, choice=lambda seq: seq[0], max_attempts=3)

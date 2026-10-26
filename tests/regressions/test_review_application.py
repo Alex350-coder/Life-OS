@@ -141,7 +141,11 @@ def test_closing_a_cycle_archives_matching_tasks_without_completing_them(
     moved = archive_matching(vault, TaskQuery(area=Area.UNIVERSIDAD, due_to=date(2026, 7, 31)))
 
     assert sorted(t.value for t in moved) == ["t-222222", "t-333333"]
-    archived = {r.task.id: r.task.status for r in query_tasks(vault, TaskQuery(include_archived=True)) if r.archived}
+    archived = {
+        r.task.id: r.task.status
+        for r in query_tasks(vault, TaskQuery(include_archived=True))
+        if r.archived
+    }
     assert archived[TaskId("t-222222")] is TaskStatus.PROPUESTA
     assert archived[TaskId("t-333333")] is TaskStatus.COMPLETADA
     assert [r.task.id for r in query_tasks(vault, TaskQuery())] == [TaskId("t-444444")]
@@ -149,7 +153,11 @@ def test_closing_a_cycle_archives_matching_tasks_without_completing_them(
 
 def test_history_can_be_searched_by_topic_and_date(vault: FilesystemVault) -> None:
     _write(vault, "Archivo/" + A, TASK + " 📅 2026-03-01\n")
-    _write(vault, "02-Proyectos/web.md", "- [ ] Leer docs [id:: t-555555] [area:: proyectos] [esfuerzo:: 1h]\n")
+    _write(
+        vault,
+        "02-Proyectos/web.md",
+        "- [ ] Leer docs [id:: t-555555] [area:: proyectos] [esfuerzo:: 1h]\n",
+    )
 
     found = query_tasks(
         vault, TaskQuery(text="LEER", include_archived=True, due_from=date(2026, 1, 1))

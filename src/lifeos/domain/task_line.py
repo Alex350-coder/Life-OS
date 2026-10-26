@@ -6,9 +6,11 @@ afectado y vuelven a analizar el resultado para validarlo.
 """
 
 import re
-from collections.abc import Callable
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import date
+from types import MappingProxyType
+from typing import Final, TypedDict
 
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.ids import TaskId
@@ -27,11 +29,29 @@ _LINE_RE = re.compile(r"(?P<indent>[ \t]*)[-*+] \[(?P<mark>.)\] (?P<body>.*)")
 _DATE_EMOJIS = "".join((DUE, SCHEDULED, *IGNORED_DATE_EMOJIS))
 _TOKEN_RE = re.compile(
     rf"\[(?P<key>\w+)::(?P<value>[^\]]*)\]"
-    rf"|(?P<emoji>[{_DATE_EMOJIS}]){VARIATION_SELECTOR}?\s+(?P<date>\d{{4}}-\d{{2}}-\d{{2}})"
+    rf"|(?P<emoji>[{_DATE_EMOJIS}]){VARIATION_SELECTOR}?\s*(?P<date>\d{{4}}-\d{{2}}-\d{{2}})"
     rf"|(?P<recurrence>{RECURRENCE}){VARIATION_SELECTOR}?"
 )
-_DATE_FIELDS = {DUE: "fecha límite", SCHEDULED: "fecha programada"}
-_BOOLEANS = {"true": True, "false": False}
+_DATE_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
+    {DUE: "fecha límite", SCHEDULED: "fecha programada"}
+)
+_BOOLEANS: Final[Mapping[str, bool]] = MappingProxyType({"true": True, "false": False})
+KNOWN_KEYS: Final = frozenset(
+    {"id", "area", "esfuerzo", "avance", "prioridad", "estado", "inferido"}
+)
+
+
+class _TaskFields(TypedDict, total=False):
+    id: TaskId
+    area: Area
+    effort: Effort
+    progress: Progress
+    priority: Priority
+    due: date
+    scheduled: date
+    recurrence: str | None
+    state: ExplicitState
+    inferred: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,11 +65,19 @@ class _Token:
 
 @dataclass(frozen=True, slots=True)
 class TaskLine:
-    """Línea de tarea analizada. Inmutable; `render()` reproduce `raw` exactamente."""
+    """Línea de tarea analizada. Inmutable; `render()` reproduce `raw` exactamente.
+
+    Al construirse vuelve a analizar `raw`, así que `task` y `extra_fields` nunca pueden
+    contradecir el texto que se escribirá en la bóveda.
+    """
 
     raw: str
     task: Task
     extra_fields: tuple[tuple[str, str], ...] = ()
+
+    def __post_init__(self) -> None:
+        if _analyze(self.raw) != (self.task, self.extra_fields):
+            raise ValidationError("línea", self.raw, "no coincide con la tarea indicada")
 
     def render(self) -> str:
         return self.raw
@@ -74,12 +102,17 @@ def _tokenize(body: str) -> tuple[_Token, ...]:
 
 
 def _title(body: str, tokens: tuple[_Token, ...]) -> str:
-    pieces, cursor = [], 0
+    pieces: list[str] = []
+    cursor = 0
     for token in tokens:
         pieces.append(body[cursor : token.start])
         cursor = token.end
     pieces.append(body[cursor:])
-    return " ".join("".join(pieces).split())
+    title = " ".join("".join(pieces).split())
+    for emoji, field in _DATE_FIELDS.items():
+        if emoji in title:  # emoji de fecha sin una fecha AAAA-MM-DD detrás
+            raise ValidationError(field, title, "el emoji no va seguido de una fecha AAAA-MM-DD")
+    return title
 
 
 def _parse_date(field: str, text: str) -> date:
@@ -96,25 +129,36 @@ def _parse_bool(text: str) -> bool:
         raise ValidationError("inferido", text, "se espera true o false") from None
 
 
-_FIELD_PARSERS: dict[str, tuple[str, Callable[[str], object]]] = {
-    "id": ("id", TaskId),
-    "area": ("area", Area.parse),
-    "esfuerzo": ("effort", Effort.parse),
-    "avance": ("progress", Progress.parse),
-    "prioridad": ("priority", Priority.parse),
-    "estado": ("state", ExplicitState.parse),
-    "inferido": ("inferred", _parse_bool),
-}
+def _apply(fields: _TaskFields, key: str, value: str) -> None:
+    match key:
+        case "id":
+            fields["id"] = TaskId(value)
+        case "area":
+            fields["area"] = Area.parse(value)
+        case "esfuerzo":
+            fields["effort"] = Effort.parse(value)
+        case "avance":
+            fields["progress"] = Progress.parse(value)
+        case "prioridad":
+            fields["priority"] = Priority.parse(value)
+        case "estado":
+            fields["state"] = ExplicitState.parse(value)
+        case "inferido":
+            fields["inferred"] = _parse_bool(value)
+        case _ if key == DUE:
+            fields["due"] = _parse_date(_DATE_FIELDS[DUE], value)
+        case _ if key == SCHEDULED:
+            fields["scheduled"] = _parse_date(_DATE_FIELDS[SCHEDULED], value)
+        case _:  # RECURRENCE
+            fields["recurrence"] = value or None
 
 
-def _typed_values(
-    tokens: tuple[_Token, ...],
-) -> tuple[dict[str, object], tuple[tuple[str, str], ...]]:
-    values: dict[str, object] = {}
+def _typed_values(tokens: tuple[_Token, ...]) -> tuple[_TaskFields, tuple[tuple[str, str], ...]]:
+    fields: _TaskFields = {}
     extra: list[tuple[str, str]] = []
     seen: set[str] = set()
     for token in tokens:
-        if token.is_field and token.key not in _FIELD_PARSERS:
+        if token.is_field and token.key not in KNOWN_KEYS:
             extra.append((token.key, token.value))
             continue
         if token.key in IGNORED_DATE_EMOJIS:
@@ -122,27 +166,27 @@ def _typed_values(
         if token.key in seen:
             raise ValidationError(token.key, token.value, "campo duplicado en la misma tarea")
         seen.add(token.key)
-        if token.key in _DATE_FIELDS:
-            attribute = "due" if token.key == DUE else "scheduled"
-            values[attribute] = _parse_date(_DATE_FIELDS[token.key], token.value)
-        elif token.key == RECURRENCE:
-            values["recurrence"] = token.value or None
-        else:
-            attribute, parser = _FIELD_PARSERS[token.key]
-            values[attribute] = parser(token.value)
-    return values, tuple(extra)
+        _apply(fields, token.key, token.value)
+    return fields, tuple(extra)
 
 
-def parse_task_line(line: str) -> TaskLine | None:
-    """Analiza una línea sin salto final. Devuelve None si no es una tarea."""
+def _analyze(line: str) -> tuple[Task, tuple[tuple[str, str], ...]] | None:
     match = _LINE_RE.fullmatch(line)
     if match is None:
         return None
     checkbox = Checkbox.parse(match["mark"])
     body = match["body"]
     tokens = _tokenize(body)
-    values, extra = _typed_values(tokens)
-    task = Task(title=_title(body, tokens), checkbox=checkbox, **values)  # type: ignore[arg-type]
+    fields, extra = _typed_values(tokens)
+    return Task(title=_title(body, tokens), checkbox=checkbox, **fields), extra
+
+
+def parse_task_line(line: str) -> TaskLine | None:
+    """Analiza una línea sin salto final. Devuelve None si no es una tarea."""
+    analyzed = _analyze(line)
+    if analyzed is None:
+        return None
+    task, extra = analyzed
     return TaskLine(raw=line, task=task, extra_fields=extra)
 
 

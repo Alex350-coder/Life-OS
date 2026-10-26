@@ -25,9 +25,9 @@ pytestmark = [pytest.mark.security]
         "a/LPT².md",
         "CONIN$",
         "conout$.md",
-        "ＣＯＮ.md",
-        "a​.md",
-        "a /b.md",
+        "".join(map(chr, (0xFF23, 0xFF2F, 0xFF2E))) + ".md",  # CON de ancho completo
+        "a" + chr(0x200B) + ".md",  # espacio de ancho cero
+        "a" + chr(0xA0) + "/b.md",  # espacio no separable
         ".obsidian/workspace.md",
         "a/.lifeos-tmp.md",
         "a/" + "b" * 256 + ".md",

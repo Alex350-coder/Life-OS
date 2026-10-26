@@ -1,7 +1,6 @@
-"""Bóveda temporal de prueba: nunca se usa la bóveda real del propietario."""
+"""Helpers de los casos de uso; los fixtures `root` y `vault` están en tests/conftest.py."""
 
 from collections.abc import Callable
-from pathlib import Path
 
 import pytest
 
@@ -9,18 +8,6 @@ from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.ports.vault import VaultPath
 
 WriteNote = Callable[[str, str], None]
-
-
-@pytest.fixture
-def root(tmp_path: Path) -> Path:
-    vault = tmp_path / "vault"
-    vault.mkdir()
-    return vault
-
-
-@pytest.fixture
-def vault(root: Path) -> FilesystemVault:
-    return FilesystemVault(root)
 
 
 @pytest.fixture

@@ -1,5 +1,6 @@
 """Operaciones puras sobre el texto completo de una nota, respetando BOM y saltos de línea."""
 
+import re
 from dataclasses import dataclass
 
 from lifeos.domain.errors import ValidationError
@@ -8,6 +9,7 @@ from lifeos.domain.task_line import TaskLine, parse_task_line
 BOM = chr(0xFEFF)  # marca de orden de bytes UTF-8
 CRLF = "\r\n"
 LF = "\n"
+_LINE_SPLIT_RE = re.compile(r"(?<=\n)")
 
 
 @dataclass(frozen=True, slots=True)
@@ -19,6 +21,7 @@ class NoteTask:
 @dataclass(frozen=True, slots=True)
 class ParseProblem:
     index: int
+    content: str
     error: ValidationError
 
 
@@ -29,12 +32,23 @@ class ParsedNote:
 
 
 def _split(text: str) -> list[tuple[str, str]]:
-    """Separa en pares (contenido, salto) sin perder el tipo de salto de cada línea."""
-    pairs = []
-    for raw in text.splitlines(keepends=True):
+    """Separa en pares (contenido, salto) por `\\n` o `\\r\\n` únicamente.
+
+    `str.splitlines` también corta en separadores Unicode (U+0085, U+2028, \\f…) que Obsidian
+    no considera saltos de línea; usarlo desalinearía los índices respecto al editor.
+    """
+    pairs: list[tuple[str, str]] = []
+    for raw in _LINE_SPLIT_RE.split(text):
+        if not raw:
+            continue
         ending = CRLF if raw.endswith(CRLF) else LF if raw.endswith(LF) else ""
         pairs.append((raw[: len(raw) - len(ending)], ending))
     return pairs
+
+
+def split_lines(text: str) -> tuple[str, ...]:
+    """Contenido de cada línea, con la misma división que usan las demás operaciones."""
+    return tuple(content for content, _ending in _split(text))
 
 
 def _join(pairs: list[tuple[str, str]]) -> str:
@@ -60,7 +74,7 @@ def parse_note(text: str) -> ParsedNote:
         try:
             parsed = parse_task_line(candidate)
         except ValidationError as error:
-            problems.append(ParseProblem(index, error))
+            problems.append(ParseProblem(index, candidate, error))
             continue
         if parsed is not None:
             tasks.append(NoteTask(index, parsed))
@@ -90,6 +104,5 @@ def remove_line(text: str, index: int) -> str:
 def append_line(text: str, content: str) -> str:
     _check_single_line(content)
     newline = CRLF if CRLF in text else LF
-    if text and not text.endswith((LF, "\r")):
-        text += newline
-    return f"{text}{content}{newline}"
+    separator = newline if text and not text.endswith(LF) else ""
+    return f"{text}{separator}{content}{newline}"

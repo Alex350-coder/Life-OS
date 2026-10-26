@@ -85,6 +85,8 @@ class Effort:
     minutes: int
 
     def __post_init__(self) -> None:
+        if type(self.minutes) is not int:
+            raise ValidationError("esfuerzo", self.minutes, "debe ser un número entero de minutos")
         if self.minutes <= 0:
             raise ValidationError("esfuerzo", self.minutes, "debe ser mayor que cero")
 
@@ -117,6 +119,8 @@ class Progress:
     percent: int
 
     def __post_init__(self) -> None:
+        if type(self.percent) is not int:
+            raise ValidationError("avance", self.percent, "debe ser un porcentaje entero")
         if not 0 <= self.percent <= MAX_PERCENT:
             raise ValidationError("avance", self.percent, "debe estar entre 0 y 100")
 

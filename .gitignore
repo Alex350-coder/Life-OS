@@ -34,3 +34,6 @@ vault-local/
 .obsidian/
 .DS_Store
 Thumbs.db
+
+# Herramientas locales de Claude Code
+.claude/

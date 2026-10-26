@@ -1,5 +1,6 @@
 """Casos de uso de tareas: escanear, consultar, crear y actualizar (F1-T05)."""
 
+import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date
@@ -7,7 +8,13 @@ from datetime import date
 from lifeos.domain.errors import LifeOSError, ValidationError
 from lifeos.domain.ids import TaskId, new_unique_task_id
 from lifeos.domain.integrity import DuplicateTaskIdError, Location, find_duplicate_ids
-from lifeos.domain.note import ParseProblem, append_line, parse_note, remove_line, replace_line
+from lifeos.domain.note import (
+    append_line,
+    parse_note,
+    remove_line,
+    replace_line,
+    split_lines,
+)
 from lifeos.domain.task import Area, Checkbox, Effort, Priority, Task, TaskStatus
 from lifeos.domain.task_line import (
     DUE,
@@ -18,13 +25,23 @@ from lifeos.domain.task_line import (
     with_field,
     with_id,
 )
-from lifeos.ports.vault import VaultPath, VaultStore, VersionConflictError
+from lifeos.ports.vault import (
+    NoteNotFoundError,
+    VaultIOError,
+    VaultPath,
+    VaultStore,
+    VersionConflictError,
+)
 
 ARCHIVE_ROOT = VaultPath("Archivo")
-# Carpetas que la aplicación no lee como tareas ni modifica (perfil del propietario y auditoría).
-SKIPPED_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"))
+INBOX_ROOT = VaultPath("00-Inbox")
+# Carpetas que no se leen como tareas: perfil del propietario, auditoría y capturas sin
+# procesar (el texto capturado es un dato y no debe ocupar ni duplicar ids de tareas).
+SKIPPED_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"), INBOX_ROOT)
 PROTECTED_ROOTS = (ARCHIVE_ROOT, *SKIPPED_ROOTS)
 NOTE_SUFFIX = ".md"
+# Ids presentes en líneas mal formadas: siguen ocupados aunque la línea no se pueda analizar.
+_RAW_ID_RE = re.compile(r"\[id::\s*(t-[0-9a-z]{6})\s*\]")
 
 
 class ApplicationError(LifeOSError):
@@ -52,8 +69,11 @@ class LocatedTask:
 
 @dataclass(frozen=True, slots=True)
 class NoteProblem:
+    """Nota (line_index None) o línea que no se pudo analizar; se informa, no se oculta."""
+
     path: VaultPath
-    problem: ParseProblem
+    line_index: int | None
+    error: LifeOSError
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,6 +81,8 @@ class ScanReport:
     tasks: tuple[LocatedTask, ...]
     problems: tuple[NoteProblem, ...]
     duplicates: tuple[DuplicateTaskIdError, ...]
+    # Ids que aparecen en líneas con errores de formato: no se pueden reutilizar.
+    reserved_ids: frozenset[TaskId] = frozenset()
 
 
 @dataclass(frozen=True, slots=True)
@@ -69,11 +91,22 @@ class TaskQuery:
     status: TaskStatus | None = None
     due_from: date | None = None
     due_to: date | None = None
+    text: str | None = None  # búsqueda por tema en el título, sin distinguir mayúsculas
     include_archived: bool = False
+
+    def __post_init__(self) -> None:
+        if self.due_from and self.due_to and self.due_from > self.due_to:
+            raise ValidationError("fecha", self.due_from, "el inicio es posterior al final")
 
 
 def _within(path: VaultPath, roots: tuple[VaultPath, ...]) -> bool:
-    return any(path == root or path.is_under(root) for root in roots)
+    # Windows y macOS no distinguen mayúsculas: "_SISTEMA" es la misma carpeta que "_sistema".
+    parts = tuple(part.casefold() for part in path.parts)
+    return any(parts[: len(root.parts)] == _folded(root) for root in roots)
+
+
+def _folded(root: VaultPath) -> tuple[str, ...]:
+    return tuple(part.casefold() for part in root.parts)
 
 
 def is_archived(path: VaultPath) -> bool:
@@ -83,20 +116,36 @@ def is_archived(path: VaultPath) -> bool:
 # --- Lectura ----------------------------------------------------------------------------------
 
 
+def _scan_note(
+    vault: VaultStore, path: VaultPath
+) -> tuple[list[LocatedTask], list[NoteProblem], set[TaskId]]:
+    try:
+        text = vault.read(path).text
+    except (VaultIOError, NoteNotFoundError) as error:  # ilegible o borrada al listar
+        return [], [NoteProblem(path, None, error)], set()
+    parsed = parse_note(text)
+    tasks = [LocatedTask(path, item.index, item.line) for item in parsed.tasks]
+    problems = [NoteProblem(path, p.index, p.error) for p in parsed.problems]
+    reserved = {TaskId(m) for p in parsed.problems for m in _RAW_ID_RE.findall(p.content)}
+    return tasks, problems, reserved
+
+
 def scan(vault: VaultStore) -> ScanReport:
-    """Recorre la bóveda; los errores de formato se acumulan en el informe sin detenerse."""
+    """Recorre la bóveda; los errores se acumulan en el informe sin detener el escaneo."""
     tasks: list[LocatedTask] = []
     problems: list[NoteProblem] = []
+    reserved: set[TaskId] = set()
     for path in vault.list_notes():
         if _within(path, SKIPPED_ROOTS):
             continue
-        parsed = parse_note(vault.read(path).text)
-        tasks.extend(LocatedTask(path, item.index, item.line) for item in parsed.tasks)
-        problems.extend(NoteProblem(path, problem) for problem in parsed.problems)
+        note_tasks, note_problems, note_reserved = _scan_note(vault, path)
+        tasks.extend(note_tasks)
+        problems.extend(note_problems)
+        reserved.update(note_reserved)
     duplicates = find_duplicate_ids(
         (t.task.id, Location(t.path.value, t.index)) for t in tasks if t.task.id is not None
     )
-    return ScanReport(tuple(tasks), tuple(problems), duplicates)
+    return ScanReport(tuple(tasks), tuple(problems), duplicates, frozenset(reserved))
 
 
 def _matches(task: LocatedTask, query: TaskQuery) -> bool:
@@ -105,6 +154,8 @@ def _matches(task: LocatedTask, query: TaskQuery) -> bool:
     if query.area is not None and task.task.area is not query.area:
         return False
     if query.status is not None and task.task.status is not query.status:
+        return False
+    if query.text is not None and query.text.casefold() not in task.task.title.casefold():
         return False
     due = task.task.due
     if query.due_from is not None and (due is None or due < query.due_from):
@@ -118,8 +169,11 @@ def query_tasks(vault: VaultStore, query: TaskQuery) -> tuple[LocatedTask, ...]:
 
 
 def find_task(vault: VaultStore, task_id: TaskId) -> LocatedTask:
-    found = [task for task in scan(vault).tasks if task.task.id == task_id]
+    report = scan(vault)
+    found = [task for task in report.tasks if task.task.id == task_id]
     if not found:
+        if task_id in report.reserved_ids:
+            raise ApplicationError(f"la tarea {task_id} tiene errores de formato; corrígelos")
         raise TaskNotFoundError(f"no existe la tarea {task_id}")
     if len(found) > 1:
         raise DuplicateTaskIdError(task_id, tuple(Location(t.path.value, t.index) for t in found))
@@ -129,10 +183,11 @@ def find_task(vault: VaultStore, task_id: TaskId) -> LocatedTask:
 # --- Escritura --------------------------------------------------------------------------------
 
 
-def _check_writable(path: VaultPath) -> None:
+def check_writable(path: VaultPath) -> None:
+    """Rechaza carpetas protegidas (sin distinguir mayúsculas) y archivos que no son notas."""
     if _within(path, PROTECTED_ROOTS):
         raise ApplicationError(f"{path} está en una carpeta protegida")
-    if not path.name.endswith(NOTE_SUFFIX):
+    if not path.name.lower().endswith(NOTE_SUFFIX):
         raise ApplicationError(f"{path} no es una nota Markdown")
 
 
@@ -145,7 +200,7 @@ def append_to_note(vault: VaultStore, path: VaultPath, line: str) -> int:
     else:
         text = append_line("", line)
         vault.write(path, text, expected=None)
-    return len(text.splitlines()) - 1
+    return len(split_lines(text)) - 1
 
 
 def remove_from_note(vault: VaultStore, located: LocatedTask) -> None:
@@ -175,7 +230,8 @@ def _rewrite_line(
 
 
 def _taken_ids(vault: VaultStore) -> set[TaskId]:
-    return {t.task.id for t in scan(vault).tasks if t.task.id is not None}
+    report = scan(vault)
+    return {t.task.id for t in report.tasks if t.task.id is not None} | report.reserved_ids
 
 
 def _render_new_task(
@@ -211,7 +267,7 @@ def create_task(
     priority: Priority = Priority.MEDIA,
 ) -> LocatedTask:
     """Crea una tarea con id único al final de la nota indicada."""
-    _check_writable(path)
+    check_writable(path)
     task_id = new_unique_task_id(_taken_ids(vault))
     line = _render_new_task(
         title, task_id, area, effort, due=due, scheduled=scheduled, priority=priority
@@ -252,7 +308,7 @@ def update_task(
 
 def ensure_id(vault: VaultStore, path: VaultPath, index: int) -> LocatedTask:
     """Asigna un id estable a la tarea de esa línea si no lo tiene; si ya lo tiene, no escribe."""
-    _check_writable(path)
+    check_writable(path)
     lines = {item.index: item.line for item in parse_note(vault.read(path).text).tasks}
     if index not in lines:
         raise TaskNotFoundError(f"la línea {index + 1} de {path} no es una tarea")
