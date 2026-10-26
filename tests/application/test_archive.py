@@ -39,7 +39,9 @@ def test_archived_task_is_excluded_from_default_query(vault: FilesystemVault) ->
     archive_task(vault, ID)
 
     default = [r.task.id for r in query_tasks(vault, TaskQuery())]
-    everything = [r for r in query_tasks(vault, TaskQuery(include_archived=True)) if r.task.id == ID]
+    everything = [
+        r for r in query_tasks(vault, TaskQuery(include_archived=True)) if r.task.id == ID
+    ]
     assert ID not in default
     assert len(everything) == 1 and everything[0].archived
 
@@ -93,7 +95,9 @@ def test_archive_unknown_task_raises(vault: FilesystemVault) -> None:
         archive_task(vault, TaskId("t-999999"))
 
 
-def test_archive_rejects_task_with_nested_subtasks(vault: FilesystemVault, write_note: WriteNote) -> None:
+def test_archive_rejects_task_with_nested_subtasks(
+    vault: FilesystemVault, write_note: WriteNote
+) -> None:
     write_note("02-Proyectos/web.md", "- [ ] Padre [id:: t-444444]\n  - [ ] Hija [id:: t-555555]\n")
 
     with pytest.raises(ApplicationError, match="subtareas"):

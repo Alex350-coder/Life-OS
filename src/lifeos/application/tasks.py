@@ -1,0 +1,262 @@
+"""Casos de uso de tareas: escanear, consultar, crear y actualizar (F1-T05)."""
+
+from collections.abc import Callable, Mapping
+from dataclasses import dataclass
+from datetime import date
+
+from lifeos.domain.errors import LifeOSError, ValidationError
+from lifeos.domain.ids import TaskId, new_unique_task_id
+from lifeos.domain.integrity import DuplicateTaskIdError, Location, find_duplicate_ids
+from lifeos.domain.note import ParseProblem, append_line, parse_note, remove_line, replace_line
+from lifeos.domain.task import Area, Checkbox, Effort, Priority, Task, TaskStatus
+from lifeos.domain.task_line import (
+    DUE,
+    SCHEDULED,
+    TaskLine,
+    parse_task_line,
+    with_checkbox,
+    with_field,
+    with_id,
+)
+from lifeos.ports.vault import VaultPath, VaultStore, VersionConflictError
+
+ARCHIVE_ROOT = VaultPath("Archivo")
+# Carpetas que la aplicación no lee como tareas ni modifica (perfil del propietario y auditoría).
+SKIPPED_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"))
+PROTECTED_ROOTS = (ARCHIVE_ROOT, *SKIPPED_ROOTS)
+NOTE_SUFFIX = ".md"
+
+
+class ApplicationError(LifeOSError):
+    """Un caso de uso no puede completarse con el estado actual de la bóveda."""
+
+
+class TaskNotFoundError(ApplicationError):
+    """No existe ninguna tarea con ese id (o en esa línea)."""
+
+
+@dataclass(frozen=True, slots=True)
+class LocatedTask:
+    path: VaultPath
+    index: int
+    line: TaskLine
+
+    @property
+    def task(self) -> Task:
+        return self.line.task
+
+    @property
+    def archived(self) -> bool:
+        return is_archived(self.path)
+
+
+@dataclass(frozen=True, slots=True)
+class NoteProblem:
+    path: VaultPath
+    problem: ParseProblem
+
+
+@dataclass(frozen=True, slots=True)
+class ScanReport:
+    tasks: tuple[LocatedTask, ...]
+    problems: tuple[NoteProblem, ...]
+    duplicates: tuple[DuplicateTaskIdError, ...]
+
+
+@dataclass(frozen=True, slots=True)
+class TaskQuery:
+    area: Area | None = None
+    status: TaskStatus | None = None
+    due_from: date | None = None
+    due_to: date | None = None
+    include_archived: bool = False
+
+
+def _within(path: VaultPath, roots: tuple[VaultPath, ...]) -> bool:
+    return any(path == root or path.is_under(root) for root in roots)
+
+
+def is_archived(path: VaultPath) -> bool:
+    return _within(path, (ARCHIVE_ROOT,))
+
+
+# --- Lectura ----------------------------------------------------------------------------------
+
+
+def scan(vault: VaultStore) -> ScanReport:
+    """Recorre la bóveda; los errores de formato se acumulan en el informe sin detenerse."""
+    tasks: list[LocatedTask] = []
+    problems: list[NoteProblem] = []
+    for path in vault.list_notes():
+        if _within(path, SKIPPED_ROOTS):
+            continue
+        parsed = parse_note(vault.read(path).text)
+        tasks.extend(LocatedTask(path, item.index, item.line) for item in parsed.tasks)
+        problems.extend(NoteProblem(path, problem) for problem in parsed.problems)
+    duplicates = find_duplicate_ids(
+        (t.task.id, Location(t.path.value, t.index)) for t in tasks if t.task.id is not None
+    )
+    return ScanReport(tuple(tasks), tuple(problems), duplicates)
+
+
+def _matches(task: LocatedTask, query: TaskQuery) -> bool:
+    if task.archived and not query.include_archived:
+        return False
+    if query.area is not None and task.task.area is not query.area:
+        return False
+    if query.status is not None and task.task.status is not query.status:
+        return False
+    due = task.task.due
+    if query.due_from is not None and (due is None or due < query.due_from):
+        return False
+    return not (query.due_to is not None and (due is None or due > query.due_to))
+
+
+def query_tasks(vault: VaultStore, query: TaskQuery) -> tuple[LocatedTask, ...]:
+    """Consulta tareas. Por defecto excluye las archivadas (spec memoria-y-vigencia)."""
+    return tuple(task for task in scan(vault).tasks if _matches(task, query))
+
+
+def find_task(vault: VaultStore, task_id: TaskId) -> LocatedTask:
+    found = [task for task in scan(vault).tasks if task.task.id == task_id]
+    if not found:
+        raise TaskNotFoundError(f"no existe la tarea {task_id}")
+    if len(found) > 1:
+        raise DuplicateTaskIdError(task_id, tuple(Location(t.path.value, t.index) for t in found))
+    return found[0]
+
+
+# --- Escritura --------------------------------------------------------------------------------
+
+
+def _check_writable(path: VaultPath) -> None:
+    if _within(path, PROTECTED_ROOTS):
+        raise ApplicationError(f"{path} está en una carpeta protegida")
+    if not path.name.endswith(NOTE_SUFFIX):
+        raise ApplicationError(f"{path} no es una nota Markdown")
+
+
+def append_to_note(vault: VaultStore, path: VaultPath, line: str) -> int:
+    """Añade una línea al final de la nota (creándola si falta) y devuelve su índice."""
+    if vault.exists(path):
+        snapshot = vault.read(path)
+        text = append_line(snapshot.text, line)
+        vault.write(path, text, expected=snapshot.version)
+    else:
+        text = append_line("", line)
+        vault.write(path, text, expected=None)
+    return len(text.splitlines()) - 1
+
+
+def remove_from_note(vault: VaultStore, located: LocatedTask) -> None:
+    """Quita la línea de la tarea si sigue intacta; si cambió, se reporta un conflicto."""
+    snapshot = vault.read(located.path)
+    _require_same_line(snapshot.text, located)
+    vault.write(located.path, remove_line(snapshot.text, located.index), expected=snapshot.version)
+
+
+def _require_same_line(text: str, located: LocatedTask) -> None:
+    current = {item.index: item.line.raw for item in parse_note(text).tasks}
+    if current.get(located.index) != located.line.raw:
+        raise VersionConflictError(f"{located.path} cambió: la tarea ya no está en su línea")
+
+
+def _rewrite_line(
+    vault: VaultStore, path: VaultPath, index: int, transform: Callable[[TaskLine], TaskLine]
+) -> LocatedTask:
+    snapshot = vault.read(path)
+    lines = {item.index: item.line for item in parse_note(snapshot.text).tasks}
+    if index not in lines:
+        raise TaskNotFoundError(f"la línea {index + 1} de {path} no es una tarea")
+    updated = transform(lines[index])
+    new_text = replace_line(snapshot.text, index, updated.render())
+    vault.write(path, new_text, expected=snapshot.version)
+    return LocatedTask(path, index, updated)
+
+
+def _taken_ids(vault: VaultStore) -> set[TaskId]:
+    return {t.task.id for t in scan(vault).tasks if t.task.id is not None}
+
+
+def _render_new_task(
+    title: str,
+    task_id: TaskId,
+    area: Area,
+    effort: Effort,
+    *,
+    due: date | None,
+    scheduled: date | None,
+    priority: Priority,
+) -> str:
+    parts = [f"- [ ] {title}", f"[id:: {task_id}]", f"[area:: {area}]"]
+    parts.append(f"[esfuerzo:: {effort.render()}]")
+    if priority is not Priority.MEDIA:
+        parts.append(f"[prioridad:: {priority}]")
+    if due is not None:
+        parts.append(f"{DUE} {due.isoformat()}")
+    if scheduled is not None:
+        parts.append(f"{SCHEDULED} {scheduled.isoformat()}")
+    return " ".join(parts)
+
+
+def create_task(
+    vault: VaultStore,
+    path: VaultPath,
+    *,
+    title: str,
+    area: Area,
+    effort: Effort,
+    due: date | None = None,
+    scheduled: date | None = None,
+    priority: Priority = Priority.MEDIA,
+) -> LocatedTask:
+    """Crea una tarea con id único al final de la nota indicada."""
+    _check_writable(path)
+    task_id = new_unique_task_id(_taken_ids(vault))
+    line = _render_new_task(
+        title, task_id, area, effort, due=due, scheduled=scheduled, priority=priority
+    )
+    parsed = parse_task_line(line)
+    if parsed is None or parsed.task.title != " ".join(title.split()) or parsed.extra_fields:
+        raise ValidationError("título", title, "no puede contener campos, fechas ni saltos")
+    index = append_to_note(vault, path, line)
+    return LocatedTask(path, index, parsed)
+
+
+def update_task(
+    vault: VaultStore,
+    task_id: TaskId,
+    *,
+    checkbox: Checkbox | None = None,
+    fields: Mapping[str, str] | None = None,
+) -> LocatedTask:
+    """Cambia la casilla y/o campos de una tarea activa, sin tocar el resto de la nota."""
+    changes = dict(fields or {})
+    if "id" in changes:
+        raise ValidationError("id", changes["id"], "el id de una tarea es inmutable")
+    located = find_task(vault, task_id)
+    if located.archived:
+        raise ApplicationError(f"la tarea {task_id} está archivada: restáurala antes")
+
+    def transform(line: TaskLine) -> TaskLine:
+        if line.task.id != task_id:
+            raise VersionConflictError(f"{located.path} cambió: la tarea {task_id} se movió")
+        if checkbox is not None:
+            line = with_checkbox(line, checkbox)
+        for key, value in changes.items():
+            line = with_field(line, key, value)
+        return line
+
+    return _rewrite_line(vault, located.path, located.index, transform)
+
+
+def ensure_id(vault: VaultStore, path: VaultPath, index: int) -> LocatedTask:
+    """Asigna un id estable a la tarea de esa línea si no lo tiene; si ya lo tiene, no escribe."""
+    _check_writable(path)
+    lines = {item.index: item.line for item in parse_note(vault.read(path).text).tasks}
+    if index not in lines:
+        raise TaskNotFoundError(f"la línea {index + 1} de {path} no es una tarea")
+    if lines[index].task.id is not None:
+        return LocatedTask(path, index, lines[index])
+    new_id = new_unique_task_id(_taken_ids(vault))
+    return _rewrite_line(vault, path, index, lambda line: with_id(line, new_id))

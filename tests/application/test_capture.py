@@ -64,4 +64,4 @@ def test_capture_rejects_invalid_source(vault: FilesystemVault, source: str) -> 
 
 def test_capture_requires_timezone_aware_datetime(vault: FilesystemVault) -> None:
     with pytest.raises(ValidationError, match="zona horaria"):
-        capture(vault, "algo", now=datetime(2026, 10, 26, 9, 30))  # noqa: DTZ001
+        capture(vault, "algo", now=datetime(2026, 10, 26, 9, 30))
