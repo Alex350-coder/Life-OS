@@ -215,7 +215,7 @@ def test_persistent_permission_error_surfaces_as_io_error(
         raise PermissionError("bloqueado")
 
     monkeypatch.setattr(os, "replace", locked)
-    with pytest.raises(VaultIOError, match="bloqueado|permiso"):
+    with pytest.raises(VaultIOError, match=r"bloqueado|permiso"):
         vault.write(NOTE, "nuevo", expected=version)
     assert _leftover_temp_files(root) == []
 
@@ -255,10 +255,8 @@ def test_rejects_symlinked_directory_even_inside_root(vault: FilesystemVault, ro
 
 @pytest.mark.security
 @pytest.mark.skipif(sys.platform != "win32", reason="las junctions solo existen en Windows")
-def test_rejects_junction_escaping_root(
-    vault: FilesystemVault, root: Path, tmp_path: Path
-) -> None:
-    import _winapi  # noqa: PLC0415 - módulo solo disponible en Windows
+def test_rejects_junction_escaping_root(vault: FilesystemVault, root: Path, tmp_path: Path) -> None:
+    import _winapi  # módulo solo disponible en Windows
 
     outside = tmp_path / "fuera"
     outside.mkdir()
