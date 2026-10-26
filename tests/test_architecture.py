@@ -53,3 +53,14 @@ def test_runtime_has_no_third_party_dependencies() -> None:
                 continue
             third_party.update(root for root in roots if root not in stdlib_or_local)
     assert third_party == set()
+
+
+def test_source_uses_only_absolute_imports() -> None:
+    # Los imports relativos esquivarían la comprobación de capas de arriba.
+    relative = {
+        str(path.relative_to(SRC))
+        for path in SRC.rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ImportFrom) and node.level > 0
+    }
+    assert relative == set()
