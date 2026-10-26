@@ -1,4 +1,4 @@
-"""Integridad de IDs: los duplicados se reportan con todas sus ubicaciones y no se resuelven solos."""
+"""Integridad de IDs: los duplicados se reportan con todas sus ubicaciones."""
 
 import pytest
 
