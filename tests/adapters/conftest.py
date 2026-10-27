@@ -69,7 +69,7 @@ def stub_server() -> Iterator[StubServer]:
     server = ThreadingHTTPServer(("127.0.0.1", 0), _handler(StubServer("")))
     stub = StubServer(f"http://127.0.0.1:{server.server_address[1]}/v1")
     server.RequestHandlerClass = _handler(stub)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread = threading.Thread(target=server.serve_forever, args=(0.02,), daemon=True)
     thread.start()
     try:
         yield stub

@@ -1,7 +1,11 @@
 """F2-T01: pasarela de modelos — perfiles, reintentos seguros y límites de tasa."""
 
 import pytest
+
+from lifeos.adapters.yaml_config import parse_catalog
 from lifeos.application.llm_calls import CallContext, ModelGateway, RetryPolicy
+from lifeos.application.tasks import ApplicationError
+from lifeos.domain.errors import ValidationError
 from lifeos.ports.llm import (
     ChatMessage,
     LlmConnectionError,
@@ -11,10 +15,6 @@ from lifeos.ports.llm import (
     LlmResponseError,
     LlmTimeoutError,
 )
-
-from lifeos.adapters.yaml_config import parse_catalog
-from lifeos.application.tasks import ApplicationError
-from lifeos.domain.errors import ValidationError
 from tests import config_samples as samples
 from tests.fakes import FakeClock, FakeLlmClient, ok_response
 

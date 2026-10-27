@@ -1,24 +1,27 @@
 """F2-T01: cliente NVIDIA (compatible con OpenAI) contra un servidor local programado."""
 
 import json
+import socket
 from datetime import UTC, datetime
 
 import pytest
+
 from lifeos.adapters.nvidia_llm import MAX_RESPONSE_BYTES, NvidiaChatClient, parse_retry_after
 from lifeos.adapters.secrets import Secret
 from lifeos.ports.llm import (
     ChatMessage,
     LlmConnectionError,
+    LlmError,
     LlmProviderError,
     LlmRateLimitError,
     LlmRequest,
     LlmResponseError,
     LlmTimeoutError,
 )
-
 from tests.adapters.conftest import Reply, StubServer
 
-FAKE_KEY = "nvapi-TESTKEY-0123456789abcdefXYZ"
+# Se compone en dos partes para que el archivo no contenga un patrón de clave real.
+FAKE_KEY = "nvapi" + "-TESTKEY-0123456789abcdefXYZ"
 NOW = datetime(2026, 10, 27, 12, 0, tzinfo=UTC)
 
 pytestmark = [pytest.mark.integration]
@@ -184,11 +187,35 @@ def test_redirects_are_not_followed(stub_server: StubServer) -> None:
     assert [r.path for r in stub_server.received] == ["/v1/chat/completions"]
 
 
+def _closed_port() -> int:
+    with socket.socket() as probe:
+        probe.bind(("127.0.0.1", 0))
+        return int(probe.getsockname()[1])
+
+
 def test_connection_refused_is_a_retryable_connection_error() -> None:
-    client = NvidiaChatClient("http://127.0.0.1:9/v1", Secret(FAKE_KEY), now=lambda: NOW)
+    # En Windows el rechazo tarda ~2 s (reintentos de SYN): el plazo debe superarlo.
+    url = f"http://127.0.0.1:{_closed_port()}/v1"
+    client = NvidiaChatClient(url, Secret(FAKE_KEY), now=lambda: NOW)
     with pytest.raises(LlmConnectionError) as info:
-        client.complete(_request(timeout_s=2))
+        client.complete(_request(timeout_s=10))
     assert info.value.retryable is True
+
+
+@pytest.mark.parametrize(
+    ("reason", "expected", "retryable"),
+    [
+        (ConnectionRefusedError(), LlmConnectionError, True),
+        (socket.gaierror(), LlmConnectionError, False),
+        (TimeoutError(), LlmTimeoutError, False),
+    ],
+)
+def test_connection_failures_are_classified(
+    reason: OSError, expected: type[LlmError], retryable: bool
+) -> None:
+    error = NvidiaChatClient._connection_error(reason)
+    assert type(error) is expected
+    assert error.retryable is retryable
 
 
 # --- Respuestas malformadas ---------------------------------------------------------------

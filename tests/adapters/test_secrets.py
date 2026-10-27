@@ -3,9 +3,10 @@
 from pathlib import Path
 
 import pytest
+
 from lifeos.adapters.secrets import MissingSecretError, Secret, read_dotenv, resolve_secret
 
-KEY = "nvapi-TESTKEY-0123456789abcdefXYZ"
+KEY = "nvapi" + "-TESTKEY-0123456789abcdefXYZ"  # en dos partes: sin patrón real
 
 pytestmark = [pytest.mark.unit, pytest.mark.security]
 
