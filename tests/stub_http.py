@@ -17,6 +17,7 @@ class Reply:
     delay_s: float = 0.0  # espera antes de responder
     chunk_delay_s: float = 0.0  # espera entre fragmentos del cuerpo (respuesta lenta)
     chunks: int = 1
+    declared_length: int | None = None  # Content-Length falso: cuerpo cortado
 
 
 @dataclass(frozen=True)
@@ -48,7 +49,7 @@ def _handler(stub: StubServer) -> type[BaseHTTPRequestHandler]:
                 self.send_response(reply.status)
                 for name, value in reply.headers:
                     self.send_header(name, value)
-                self.send_header("Content-Length", str(len(reply.body)))
+                self.send_header("Content-Length", str(reply.declared_length or len(reply.body)))
                 self.end_headers()
                 size = max(1, len(reply.body) // reply.chunks)
                 for start in range(0, len(reply.body), size):
