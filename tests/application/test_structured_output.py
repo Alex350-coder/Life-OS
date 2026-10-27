@@ -3,9 +3,9 @@
 from datetime import time
 
 import pytest
-from lifeos.adapters.schemas import SCHEMAS
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
+from lifeos.adapters.schemas import SCHEMAS
 from lifeos.adapters.yaml_config import parse_catalog
 from lifeos.application.llm_calls import CallContext, ModelGateway
 from lifeos.application.tools import ActorContext, ToolRegistry

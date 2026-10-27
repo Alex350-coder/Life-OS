@@ -93,3 +93,20 @@ class LlmResponseError(LlmError):
     """El proveedor respondió con un sobre que no cumple el formato esperado."""
 
     outcome = "respuesta_malformada"
+
+
+class ModelOutputError(LlmError):
+    """La salida del modelo no cumple el esquema esperado: no se usa ni se persiste (SEC-07)."""
+
+    outcome = "salida_invalida"
+
+
+class OutputSchema[T](Protocol):
+    """Contrato de salida registrado en código (`contrato.salida` de un agente)."""
+
+    @property
+    def id(self) -> str: ...
+
+    def parse(self, raw: str) -> T:
+        """Devuelve un objeto propio ya validado o lanza `ModelOutputError`."""
+        ...

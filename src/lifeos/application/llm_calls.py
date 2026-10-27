@@ -22,6 +22,8 @@ from lifeos.ports.llm import (
     LlmRateLimitError,
     LlmRequest,
     LlmResponse,
+    ModelOutputError,
+    OutputSchema,
     TokenUsage,
 )
 from lifeos.ports.logs import CostStatus, UsageLog, UsageRecord
@@ -30,6 +32,7 @@ MAX_PROMPT_CHARS = 200_000
 _TOKENS_PER_PRICE_UNIT = Decimal(1_000_000)  # las tarifas se expresan por millón de tokens
 _TOO_MANY_REQUESTS = 429
 _OK = "ok"
+_TRUNCATED = "length"  # finish_reason cuando se alcanzó max_tokens
 JITTER_FRACTION = 0.5  # el backoff crece hasta un 50 % para no sincronizar reintentos
 
 
@@ -124,6 +127,32 @@ class ModelGateway:
     ) -> LlmResponse:
         """Devuelve la respuesta del modelo; cada intento queda en el log de uso."""
         return self._run(ctx, messages, idempotent=idempotent, accept=lambda _response: None)
+
+    def complete_structured[T](
+        self,
+        ctx: CallContext,
+        messages: tuple[ChatMessage, ...],
+        schema: OutputSchema[T],
+        *,
+        idempotent: bool = True,
+    ) -> T:
+        """Devuelve solo un objeto validado por `schema` (SEC-07). Una salida truncada o
+        malformada se registra como `salida_invalida` y se rechaza; nunca se devuelve parcial."""
+        parsed: list[T] = []
+
+        def accept(response: LlmResponse) -> str | None:
+            if response.finish_reason == _TRUNCATED:
+                return ModelOutputError.outcome
+            try:
+                parsed.append(schema.parse(response.text))
+            except ModelOutputError:
+                return ModelOutputError.outcome
+            return None
+
+        self._run(ctx, messages, idempotent=idempotent, accept=accept)
+        if not parsed:
+            raise ModelOutputError(f"salida no válida o truncada para {schema.id}")
+        return parsed[0]
 
     def _run(
         self,

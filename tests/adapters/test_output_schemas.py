@@ -3,10 +3,10 @@
 from datetime import time
 
 import pytest
-from lifeos.adapters.schemas import MAX_OUTPUT_CHARS, SCHEMAS
-from lifeos.domain.proposals import CaptureDraft
 
+from lifeos.adapters.schemas import MAX_OUTPUT_CHARS, SCHEMAS
 from lifeos.domain.checkin import CheckInEntry
+from lifeos.domain.proposals import CaptureDraft
 from lifeos.ports.llm import ModelOutputError
 
 pytestmark = [pytest.mark.unit, pytest.mark.security]
