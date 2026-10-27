@@ -182,9 +182,10 @@ def check_writable(
 ) -> None:
     """Rechaza carpetas protegidas (sin distinguir mayúsculas) y archivos que no son notas.
 
-    `protected` lo calcula la raíz de composición con `permissions.protected_roots(policy)`.
+    `protected` lo calcula la raíz de composición con `permissions.protected_roots(policy)`;
+    el mínimo de las reglas se aplica siempre, aunque se pase una lista vacía.
     """
-    if within_any(path, protected):
+    if within_any(path, (*DEFAULT_PROTECTED_ROOTS, *protected)):
         raise ApplicationError(f"{path} está en una carpeta protegida")
     if not path.name.lower().endswith(NOTE_SUFFIX):
         raise ApplicationError(f"{path} no es una nota Markdown")

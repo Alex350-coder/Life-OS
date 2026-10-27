@@ -37,11 +37,27 @@ def _json_value(value: object) -> object:
     return value
 
 
+def _ends_without_newline(path: Path) -> bool:
+    """Una escritura anterior cortada (disco lleno) no debe pegar dos registros en una línea."""
+    try:
+        with path.open("rb") as handle:
+            handle.seek(0, os.SEEK_END)
+            if handle.tell() == 0:
+                return False
+            handle.seek(-1, os.SEEK_END)
+            return handle.read(1) != b"\n"
+    except FileNotFoundError:
+        return False
+
+
 class _JsonlLog:
     def __init__(self, directory: Path, prefix: str, secrets: tuple[str, ...]) -> None:
         self._dir = directory
         self._prefix = prefix
-        self._secrets = tuple(secret for secret in secrets if secret)
+        # Cada secreto se busca tal cual y en su forma escapada dentro de JSON (`"` y `\\`).
+        self._secrets = tuple(
+            {form for secret in secrets if secret for form in (secret, json.dumps(secret)[1:-1])}
+        )
         self._lock = threading.Lock()
 
     def _line(self, record: UsageRecord | AuditRecord) -> str:
@@ -58,8 +74,9 @@ class _JsonlLog:
         try:
             with self._lock:
                 self._dir.mkdir(parents=True, exist_ok=True)
+                prefix = "\n" if _ends_without_newline(path) else ""
                 with path.open("a", encoding="utf-8", newline="\n") as handle:
-                    handle.write(line + "\n")
+                    handle.write(prefix + line + "\n")
                     handle.flush()
                     os.fsync(handle.fileno())
         except OSError as error:

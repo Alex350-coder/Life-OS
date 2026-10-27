@@ -8,9 +8,11 @@ de modelos.
 
 import os
 from collections.abc import Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import UTC
 from pathlib import Path
+from types import MappingProxyType
+from typing import Self
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.adapters.jsonl_logs import JsonlAuditLog, JsonlUsageLog
@@ -27,8 +29,10 @@ from lifeos.application.permissions import (
     resolve_effective,
 )
 from lifeos.application.tools import ToolRegistry
+from lifeos.ports.clock import Clock
 from lifeos.ports.config import ConfigRejectedError, ModelCatalog, Policy
 from lifeos.ports.llm import LlmClient
+from lifeos.ports.logs import AuditLog, UsageLog
 from lifeos.ports.vault import VaultPath
 
 ENV_FILE = ".env"
@@ -42,10 +46,11 @@ class Settings:
     config_dir: Path
     logs_dir: Path
     vault_path: Path | None
-    environ: Mapping[str, str]  # entorno del proceso con `.env` como respaldo (sin sobrescribir)
+    # Entorno del proceso con `.env` como respaldo. Contiene secretos: nunca aparece en `repr`.
+    environ: Mapping[str, str] = field(repr=False)
 
     @classmethod
-    def from_env(cls, project_root: Path, environ: Mapping[str, str] | None = None) -> "Settings":
+    def from_env(cls, project_root: Path, environ: Mapping[str, str] | None = None) -> Self:
         process = dict(os.environ if environ is None else environ)
         merged = {**read_dotenv(project_root / ENV_FILE), **{k: v for k, v in process.items() if v}}
         logs = merged.get("LIFEOS_LOGS_DIR") or str(project_root / DEFAULT_LOGS_DIR)
@@ -55,7 +60,7 @@ class Settings:
             config_dir=project_root / CONFIG_DIR,
             logs_dir=Path(logs),
             vault_path=Path(vault) if vault else None,
-            environ=merged,
+            environ=MappingProxyType(merged),
         )
 
 
@@ -65,9 +70,9 @@ class Runtime:
     catalog: ModelCatalog
     permissions: Mapping[str, EffectivePermissions]
     protected: tuple[VaultPath, ...]
-    usage_log: JsonlUsageLog
-    audit_log: JsonlAuditLog
-    clock: SystemClock
+    usage_log: UsageLog
+    audit_log: AuditLog
+    clock: Clock
     gateway: ModelGateway | None
     tools: ToolRegistry | None
 

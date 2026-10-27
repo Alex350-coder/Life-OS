@@ -6,7 +6,9 @@ operación de socket, respuesta limitada a 1 MiB y errores que nunca incluyen el
 proveedor ni la clave. Un `202` (resultado pendiente) no se consulta: se informa como error.
 """
 
+import email.message
 import email.utils
+import http.client
 import json
 import time
 import urllib.error
@@ -14,7 +16,7 @@ import urllib.request
 from collections.abc import Callable
 from datetime import UTC, datetime
 from http.client import HTTPMessage, HTTPResponse
-from typing import IO, Any
+from typing import IO
 from urllib.parse import urlsplit
 
 from lifeos.adapters.secrets import Secret
@@ -91,7 +93,7 @@ def _reject_constant(name: str) -> object:
 def _parse_envelope(raw: bytes, fallback_model: str) -> LlmResponse:
     try:
         data = json.loads(raw, parse_constant=_reject_constant)
-    except (ValueError, UnicodeDecodeError):
+    except (ValueError, UnicodeDecodeError, RecursionError):
         raise LlmResponseError("la respuesta del proveedor no es JSON válido") from None
     if not isinstance(data, dict):
         raise LlmResponseError("la respuesta del proveedor no es un objeto")
@@ -131,10 +133,18 @@ class NvidiaChatClient:
         *,
         now: Callable[[], datetime] = lambda: datetime.now(UTC),
     ) -> None:
-        self._url = f"{_check_base_url(base_url)}/chat/completions"
+        checked = _check_base_url(base_url)
+        key = api_key.reveal()
+        if not key.isascii() or not key.isprintable():
+            raise ValueError("la clave del proveedor debe ser texto ASCII imprimible")
+        self._url = f"{checked}/chat/completions"
         self._key = api_key
         self._now = now
-        self._opener = urllib.request.build_opener(_NoRedirect())
+        handlers: list[urllib.request.BaseHandler] = [_NoRedirect()]
+        if urlsplit(checked).hostname == _LOOPBACK:
+            # Pruebas locales: nunca a través del proxy del sistema (registro de Windows).
+            handlers.append(urllib.request.ProxyHandler({}))
+        self._opener = urllib.request.build_opener(*handlers)
 
     @property
     def provider(self) -> str:
@@ -176,6 +186,11 @@ class NvidiaChatClient:
             raise self._connection_error(error.reason) from None
         except TimeoutError:
             raise LlmTimeoutError(f"{PROVIDER}: se agotó el plazo de {timeout_s} s") from None
+        except http.client.HTTPException as error:
+            # Cuerpo cortado o cabeceras inválidas: la petición ya se envió, no se repite.
+            raise LlmConnectionError(
+                f"{PROVIDER}: respuesta HTTP incompleta ({type(error).__name__})", retryable=False
+            ) from None
         except OSError as error:
             # Conexión cortada tras enviar: no es seguro repetir la petición.
             raise LlmConnectionError(
@@ -189,7 +204,7 @@ class NvidiaChatClient:
             )
         chunks: list[bytes] = []
         size = 0
-        while chunk := response.read(_CHUNK_BYTES):
+        while chunk := response.read1(_CHUNK_BYTES):
             size += len(chunk)
             if size > MAX_RESPONSE_BYTES:
                 raise LlmResponseError(f"la respuesta supera el tamaño de {MAX_RESPONSE_BYTES}")
@@ -200,7 +215,9 @@ class NvidiaChatClient:
             raise TimeoutError
         return b"".join(chunks)
 
-    def _http_error(self, status: int, headers: Any) -> LlmProviderError | LlmRateLimitError:
+    def _http_error(
+        self, status: int, headers: email.message.Message
+    ) -> LlmProviderError | LlmRateLimitError:
         if status == 429:
             retry_after = parse_retry_after(headers.get("Retry-After"), self._now())
             return LlmRateLimitError(f"{PROVIDER}: límite de tasa (429)", retry_after_s=retry_after)

@@ -75,6 +75,8 @@ class PydanticOutputSchema[M: BaseModel, T]:
             data = json.loads(
                 _unwrap(raw), object_pairs_hook=_reject_duplicates, parse_constant=_reject_constant
             )
+        except RecursionError:
+            raise self._fail("JSON anidado en exceso") from None
         except ValueError as error:
             reason = str(error) if not isinstance(error, json.JSONDecodeError) else "no es JSON"
             raise self._fail(reason) from None

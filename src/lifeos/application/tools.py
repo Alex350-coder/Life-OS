@@ -12,17 +12,24 @@ from dataclasses import dataclass
 
 from lifeos.application.capture import INBOX, capture
 from lifeos.application.checkin import append_checkin
-from lifeos.application.permissions import EffectivePermissions
+from lifeos.application.permissions import TOOL_WRITE_MODES, EffectivePermissions
 from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.application.tasks import LocatedTask, TaskQuery, query_tasks
 from lifeos.domain.checkin import CheckInEntry
-from lifeos.domain.errors import LifeOSError
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import WriteMode
-from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult
+from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult, LogWriteError
 from lifeos.ports.vault import PathRejectedError, VaultPath, VaultStore
 
 _REJECTED_PATH = "(ruta rechazada)"
+
+
+class AuditIncompleteError(LogWriteError):
+    """La escritura SÍ ocurrió, pero no se pudo registrar su resultado. No repetirla a ciegas."""
+
+    def __init__(self, written: str) -> None:
+        super().__init__(f"se escribió {written} pero no se pudo auditar el resultado")
+        self.written = written
 
 
 @dataclass(frozen=True, slots=True)
@@ -91,11 +98,15 @@ class ToolRegistry:
             result = operation()
         except PermissionDeniedError as error:
             raise self._deny(actor, tool, target, error) from None
-        except LifeOSError as error:
+        except Exception as error:
+            # Cualquier fallo cierra el `intento`; la excepción original no se oculta.
             self._log(actor, tool, target, AuditResult.ERROR, type(error).__name__)
             raise
         written = str(result) if isinstance(result, VaultPath) else target
-        self._log(actor, tool, written, AuditResult.OK, None)
+        try:
+            self._log(actor, tool, written, AuditResult.OK, None)
+        except LogWriteError as error:
+            raise AuditIncompleteError(written) from error
         return result
 
     # --- Herramientas ---------------------------------------------------------------------------
@@ -103,19 +114,20 @@ class ToolRegistry:
     def leer_nota(self, actor: ActorContext, path: str) -> str:
         tool = "leer_nota"
         target = self._parse(actor, tool, path)
-        vault = self._scoped(actor, tool, str(target), None)
+        vault = self._scoped(actor, tool, str(target), TOOL_WRITE_MODES[tool])
         try:
             return vault.read(target).text
         except PermissionDeniedError as error:
             raise self._deny(actor, tool, str(target), error) from None
 
     def listar_tareas(self, actor: ActorContext, query: TaskQuery) -> tuple[LocatedTask, ...]:
-        vault = self._scoped(actor, "listar_tareas", "(bóveda)", None)
+        tool = "listar_tareas"
+        vault = self._scoped(actor, tool, "(bóveda)", TOOL_WRITE_MODES[tool])
         return query_tasks(vault, query)
 
     def crear_captura(self, actor: ActorContext, texto: str) -> VaultPath:
         tool = "crear_captura"
-        vault = self._scoped(actor, tool, str(INBOX), WriteMode.CREAR)
+        vault = self._scoped(actor, tool, str(INBOX), TOOL_WRITE_MODES[tool])
         now = self._clock.now()
         return self._write(
             actor, tool, str(INBOX), lambda: capture(vault, texto, now=now, source=actor.agent_id)
@@ -124,5 +136,5 @@ class ToolRegistry:
     def anexar_checkin(self, actor: ActorContext, path: str, entry: CheckInEntry) -> VaultPath:
         tool = "anexar_checkin"
         target = self._parse(actor, tool, path)
-        vault = self._scoped(actor, tool, str(target), WriteMode.ANEXAR_SECCION)
+        vault = self._scoped(actor, tool, str(target), TOOL_WRITE_MODES[tool])
         return self._write(actor, tool, str(target), lambda: append_checkin(vault, target, entry))

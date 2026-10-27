@@ -11,7 +11,7 @@ from lifeos.application.permissions import (
     protected_roots,
     resolve_effective,
 )
-from lifeos.ports.config import ConfigRejectedError, WriteGrant, WriteMode
+from lifeos.ports.config import ConfigRejectedError, ConfigSyntaxError, WriteGrant, WriteMode
 from lifeos.ports.vault import VaultPath
 from tests import config_samples as samples
 
@@ -203,12 +203,14 @@ def test_policy_grants_inside_forbidden_or_restricted_roots_are_rejected(
 
 
 def test_policy_append_grant_requires_section_and_tools_must_exist() -> None:
+    # La sección forma parte del tipo `WriteGrant`: el cargador ya rechaza el archivo.
     policy = samples.policy()
     policy["agentes"]["coach"]["escritura"].append(_write("Semanal/", "anexar_seccion"))
+    with pytest.raises(ConfigSyntaxError, match="seccion"):
+        parse_policy(samples.dump(policy).encode())
+    policy = samples.policy()
     policy["agentes"]["coach"]["herramientas"].append("borrar_todo")
-    violations = _rejected(policy=policy)
-    assert any("seccion" in v for v in violations)
-    assert any("borrar_todo" in v for v in violations)
+    assert any("borrar_todo" in v for v in _rejected(policy=policy))
 
 
 # --- Raíces protegidas derivadas de la política ------------------------------------------

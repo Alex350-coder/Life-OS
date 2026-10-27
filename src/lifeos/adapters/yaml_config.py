@@ -74,14 +74,8 @@ def _reject_unsafe_events(text: str, source: str) -> None:
                 raise ConfigSyntaxError(source, (f"ancla no permitida{_mark(event)}",))
             if event.tag is not None:
                 raise ConfigSyntaxError(source, (f"etiqueta YAML no permitida{_mark(event)}",))
-            if (
-                isinstance(event, yaml.ScalarEvent)
-                and event.value == _MERGE_KEY
-                and not event.style
-            ):
-                raise ConfigSyntaxError(
-                    source, (f"clave de fusión '<<' no permitida{_mark(event)}",)
-                )
+            if _is_merge_key(event):
+                raise ConfigSyntaxError(source, (f"clave de fusión '<<' prohibida{_mark(event)}",))
     if documents != 1:
         raise ConfigSyntaxError(source, (f"se esperaba un único documento, hay {documents}",))
 
@@ -170,6 +164,12 @@ class _PolicyWrite(_Strict):
     ruta: Root
     modo: Literal["crear", "anexar_seccion", "plan"]
     seccion: Section | None = None
+
+    @model_validator(mode="after")
+    def _section_matches_mode(self) -> Self:
+        if (self.modo == "anexar_seccion") != (self.seccion is not None):
+            raise ValueError("'seccion' es obligatoria con anexar_seccion y solo con ese modo")
+        return self
 
 
 class _Ceiling(_Strict):

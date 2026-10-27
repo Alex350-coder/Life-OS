@@ -9,6 +9,7 @@ import random
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from decimal import Decimal
+from functools import partial
 
 from lifeos.application.tasks import ApplicationError
 from lifeos.domain.errors import ValidationError
@@ -26,14 +27,21 @@ from lifeos.ports.llm import (
     OutputSchema,
     TokenUsage,
 )
-from lifeos.ports.logs import CostStatus, UsageLog, UsageRecord
+from lifeos.ports.logs import CostStatus, LogWriteError, UsageLog, UsageOutcome, UsageRecord
 
 MAX_PROMPT_CHARS = 200_000
 _TOKENS_PER_PRICE_UNIT = Decimal(1_000_000)  # las tarifas se expresan por millón de tokens
 _TOO_MANY_REQUESTS = 429
-_OK = "ok"
 _TRUNCATED = "length"  # finish_reason cuando se alcanzó max_tokens
 JITTER_FRACTION = 0.5  # el backoff crece hasta un 50 % para no sincronizar reintentos
+
+
+class UsageNotRecordedError(LogWriteError):
+    """La llamada se completó (y se pagó) pero no pudo registrarse. Conserva la respuesta."""
+
+    def __init__(self, message: str, *, response: LlmResponse) -> None:
+        super().__init__(message)
+        self.response = response
 
 
 @dataclass(frozen=True, slots=True)
@@ -125,8 +133,12 @@ class ModelGateway:
         *,
         idempotent: bool = True,
     ) -> LlmResponse:
-        """Devuelve la respuesta del modelo; cada intento queda en el log de uso."""
-        return self._run(ctx, messages, idempotent=idempotent, accept=lambda _response: None)
+        """Devuelve la respuesta del modelo; cada intento queda en el log de uso.
+
+        Una respuesta cortada por `max_tokens` se devuelve, pero se registra como `truncada`
+        y el llamador la reconoce por `finish_reason`.
+        """
+        return self._run(ctx, messages, idempotent=idempotent, convert=lambda response: response)
 
     def complete_structured[T](
         self,
@@ -138,31 +150,23 @@ class ModelGateway:
     ) -> T:
         """Devuelve solo un objeto validado por `schema` (SEC-07). Una salida truncada o
         malformada se registra como `salida_invalida` y se rechaza; nunca se devuelve parcial."""
-        parsed: list[T] = []
 
-        def accept(response: LlmResponse) -> str | None:
+        def convert(response: LlmResponse) -> T:
             if response.finish_reason == _TRUNCATED:
-                return ModelOutputError.outcome
-            try:
-                parsed.append(schema.parse(response.text))
-            except ModelOutputError:
-                return ModelOutputError.outcome
-            return None
+                raise ModelOutputError(f"salida truncada para {schema.id}")
+            return schema.parse(response.text)
 
-        self._run(ctx, messages, idempotent=idempotent, accept=accept)
-        if not parsed:
-            raise ModelOutputError(f"salida no válida o truncada para {schema.id}")
-        return parsed[0]
+        return self._run(ctx, messages, idempotent=idempotent, convert=convert)
 
-    def _run(
+    def _run[T](
         self,
         ctx: CallContext,
         messages: tuple[ChatMessage, ...],
         *,
         idempotent: bool,
-        accept: Callable[[LlmResponse], str | None],
-    ) -> LlmResponse:
-        """`accept` devuelve el resultado a registrar si la respuesta no es utilizable."""
+        convert: Callable[[LlmResponse], T],
+    ) -> T:
+        """Llama al modelo con reintentos y registra cada intento antes de devolver o fallar."""
         _validate_messages(messages)
         profile, client = self._route(ctx.profile)
         request = LlmRequest(
@@ -178,9 +182,8 @@ class ModelGateway:
             try:
                 response = client.complete(request)
             except LlmError as error:
-                self._record(
-                    ctx, profile, attempt, started, error.outcome, None, _http_status(error)
-                )
+                status = _http_status(error)
+                self._record(ctx, profile, attempt, started, error.outcome, None, status)
                 delay = self._delay(error, attempt, waited, idempotent=idempotent)
                 if delay is None:
                     raise
@@ -188,10 +191,36 @@ class ModelGateway:
                 waited += delay
                 attempt += 1
                 continue
-            rejected = accept(response)
-            outcome = rejected or _OK
-            self._record(ctx, profile, attempt, started, outcome, response, response.http_status)
-            return response
+            return self._finish(ctx, profile, attempt, started, response, convert)
+
+    def _finish[T](
+        self,
+        ctx: CallContext,
+        profile: Profile,
+        attempt: int,
+        started: float,
+        response: LlmResponse,
+        convert: Callable[[LlmResponse], T],
+    ) -> T:
+        """Convierte la respuesta y registra el intento con su resultado real, pase lo que pase."""
+        record = partial(self._record, ctx, profile, attempt, started)
+        status = response.http_status
+        try:
+            result = convert(response)
+        except ModelOutputError:
+            record(UsageOutcome.SALIDA_INVALIDA, response, status)
+            raise
+        except Exception:
+            record(UsageOutcome.ERROR_INTERNO, response, status)
+            raise
+        truncated = response.finish_reason == _TRUNCATED
+        outcome = UsageOutcome.TRUNCADA if truncated else UsageOutcome.OK
+        try:
+            record(outcome, response, status)
+        except LogWriteError as error:
+            # La llamada ya se pagó: se informa sin perder la respuesta para no repetirla.
+            raise UsageNotRecordedError(str(error), response=response) from error
+        return result
 
     def _record(
         self,
@@ -199,7 +228,7 @@ class ModelGateway:
         profile: Profile,
         attempt: int,
         started: float,
-        outcome: str,
+        outcome: UsageOutcome,
         response: LlmResponse | None,
         http_status: int | None,
     ) -> None:

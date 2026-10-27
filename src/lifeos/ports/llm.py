@@ -1,9 +1,10 @@
 """Puerto de modelos de lenguaje (ADR-0007). Los casos de uso no conocen ningún proveedor."""
 
 from dataclasses import dataclass
-from typing import Literal, Protocol
+from typing import ClassVar, Literal, Protocol
 
 from lifeos.domain.errors import LifeOSError
+from lifeos.ports.logs import UsageOutcome
 
 Role = Literal["system", "user", "assistant"]
 
@@ -53,18 +54,18 @@ class LlmClient(Protocol):
 class LlmError(LifeOSError):
     """Fallo técnico al llamar a un modelo. Los mensajes nunca incluyen cuerpos ni claves."""
 
-    outcome = "error_proveedor"
-    retryable = False
+    outcome: ClassVar[UsageOutcome] = UsageOutcome.ERROR_PROVEEDOR
+    retryable: bool = False
 
 
 class LlmTimeoutError(LlmError):
     """Se agotó el plazo. No se reintenta: la petición pudo procesarse (y facturarse)."""
 
-    outcome = "timeout"
+    outcome = UsageOutcome.TIMEOUT
 
 
 class LlmRateLimitError(LlmError):
-    outcome = "limite_tasa"
+    outcome = UsageOutcome.LIMITE_TASA
     retryable = True
 
     def __init__(self, message: str, *, retry_after_s: float | None) -> None:
@@ -82,7 +83,7 @@ class LlmProviderError(LlmError):
 class LlmConnectionError(LlmError):
     """No se pudo conectar. Solo es reintentable si la petición no llegó a enviarse."""
 
-    outcome = "error_conexion"
+    outcome = UsageOutcome.ERROR_CONEXION
 
     def __init__(self, message: str, *, retryable: bool) -> None:
         super().__init__(message)
@@ -92,13 +93,13 @@ class LlmConnectionError(LlmError):
 class LlmResponseError(LlmError):
     """El proveedor respondió con un sobre que no cumple el formato esperado."""
 
-    outcome = "respuesta_malformada"
+    outcome = UsageOutcome.RESPUESTA_MALFORMADA
 
 
 class ModelOutputError(LlmError):
     """La salida del modelo no cumple el esquema esperado: no se usa ni se persiste (SEC-07)."""
 
-    outcome = "salida_invalida"
+    outcome = UsageOutcome.SALIDA_INVALIDA
 
 
 class OutputSchema[T](Protocol):

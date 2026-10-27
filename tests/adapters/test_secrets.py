@@ -67,3 +67,10 @@ def test_resolve_secret_falls_back_to_dotenv_and_fails_clearly() -> None:
     assert resolve_secret("K", environ={}, dotenv={"K": "v"}).reveal() == "v"
     with pytest.raises(MissingSecretError, match="K"):
         resolve_secret("K", environ={"K": ""}, dotenv={})
+
+
+def test_read_dotenv_rejects_non_utf8_without_echoing(tmp_path: Path) -> None:
+    env = tmp_path / ".env"
+    env.write_bytes("CLAVE=ñ\n".encode("latin-1"))
+    with pytest.raises(ValueError, match="UTF-8"):
+        read_dotenv(env)

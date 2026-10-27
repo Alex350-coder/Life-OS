@@ -14,6 +14,18 @@ class CostStatus(StrEnum):
     DESCONOCIDO = "desconocido"  # faltan tokens o tarifa fechada: nunca se registra 0
 
 
+class UsageOutcome(StrEnum):
+    OK = "ok"
+    TRUNCADA = "truncada"  # el modelo alcanzó max_tokens: el texto puede estar incompleto
+    TIMEOUT = "timeout"
+    LIMITE_TASA = "limite_tasa"
+    ERROR_PROVEEDOR = "error_proveedor"
+    ERROR_CONEXION = "error_conexion"
+    RESPUESTA_MALFORMADA = "respuesta_malformada"
+    SALIDA_INVALIDA = "salida_invalida"
+    ERROR_INTERNO = "error_interno"
+
+
 class AuditResult(StrEnum):
     INTENTO = "intento"  # se registra antes de escribir: sin él, la escritura no ocurre
     OK = "ok"
@@ -38,8 +50,18 @@ class UsageRecord:
     tokens_completion: int | None
     cost_usd: Decimal | None
     cost_status: CostStatus
-    outcome: str
+    outcome: UsageOutcome
     http_status: int | None
+
+    def __post_init__(self) -> None:
+        if self.attempt < 1 or self.latency_ms < 0:
+            raise ValueError("intento >= 1 y latencia >= 0")
+        if any(t is not None and t < 0 for t in (self.tokens_prompt, self.tokens_completion)):
+            raise ValueError("los tokens no pueden ser negativos")
+        if (self.cost_usd is None) != (self.cost_status is CostStatus.DESCONOCIDO):
+            raise ValueError("un costo desconocido no tiene importe y uno estimado sí")
+        if self.cost_usd is not None and self.cost_usd < 0:
+            raise ValueError("el costo no puede ser negativo")
 
 
 @dataclass(frozen=True, slots=True)

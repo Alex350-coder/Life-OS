@@ -32,6 +32,9 @@ TOOL_WRITE_MODES: Mapping[str, WriteMode | None] = MappingProxyType(
     }
 )
 _SOURCE = "configuración de agentes"
+# RULES E.12: Salud y Finanzas sin lectura de agentes hasta su fase. La política puede ampliar
+# las áreas restringidas, nunca quitar estas.
+RULES_RESTRICTED_READ = (VaultPath("05-Salud"), VaultPath("06-Finanzas"))
 
 
 @dataclass(frozen=True, slots=True)
@@ -71,8 +74,6 @@ def _check_policy_grant(name: str, grant: WriteGrant, policy: Policy) -> list[st
         problems.append(f"{where}: está en una carpeta prohibida para agentes")
     if within_any(grant.root, policy.restricted_read):
         problems.append(f"{where}: está en un área restringida")
-    if (grant.mode is WriteMode.ANEXAR_SECCION) != (grant.section is not None):
-        problems.append(f"{where}: 'seccion' es obligatoria con anexar_seccion y solo con ese modo")
     return problems
 
 
@@ -96,6 +97,11 @@ def validate_policy(policy: Policy) -> list[str]:
         f"global: escritura_prohibida_para_agentes debe incluir '{root}' (RULES E.12)"
         for root in RULES_FORBIDDEN_ROOTS
         if not within_any(root, policy.forbidden_write)
+    ]
+    problems += [
+        f"global: lectura_restringida debe incluir '{root}' (RULES E.12)"
+        for root in RULES_RESTRICTED_READ
+        if not within_any(root, policy.restricted_read)
     ]
     if policy.plan_owner not in policy.agents:
         problems.append("global: dueno_plan_global no es un agente declarado en la política")

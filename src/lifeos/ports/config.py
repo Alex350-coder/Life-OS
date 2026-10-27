@@ -28,6 +28,10 @@ class WriteGrant:
     mode: WriteMode
     section: str | None = None
 
+    def __post_init__(self) -> None:
+        if (self.mode is WriteMode.ANEXAR_SECCION) != (self.section is not None):
+            raise ValueError("'section' es obligatoria con anexar_seccion y solo con ese modo")
+
 
 @dataclass(frozen=True, slots=True)
 class AgentCeiling:

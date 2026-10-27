@@ -85,7 +85,7 @@ def _request() -> LlmRequest:
     "raw", ["ARCHIV~1/x.md", "_SISTE~1/perfil.md", "05-SAL~1/x.md", "a~9b/x.md"]
 )
 def test_windows_short_names_are_rejected(raw: str) -> None:
-    with pytest.raises(PathRejectedError, match="8.3"):
+    with pytest.raises(PathRejectedError, match=r"8\.3"):
         VaultPath(raw)
 
 
@@ -114,7 +114,7 @@ def test_policy_cannot_drop_the_restricted_read_floor(missing: str) -> None:
 
 
 def test_escaped_secret_is_still_redacted(tmp_path: Path) -> None:
-    secret = 'abc"def\\ghi-1234567890'
+    secret = 'abc"def\\ghi-1234567890'  # noqa: S105 - valor ficticio
     log = JsonlAuditLog(tmp_path, secrets=(secret,))
     with pytest.raises(LogWriteError):
         log.append(AuditRecord(FIXED_NOW, "c", "coach", "x", secret, AuditResult.OK))

@@ -69,7 +69,7 @@ class PolicyVault:
 
     # --- Escritura -------------------------------------------------------------------------
 
-    def _grant_for(self, path: VaultPath) -> WriteGrant:
+    def _grants_for(self, path: VaultPath) -> tuple[WriteGrant, ...]:
         if self._mode is None:
             raise self._deny("solo_lectura", path)
         if self._mode is WriteMode.PLAN:
@@ -79,14 +79,18 @@ class PolicyVault:
             raise self._deny("carpeta_prohibida", path)
         if not path.name.lower().endswith(NOTE_SUFFIX):
             raise self._deny("no_es_nota", path)
-        for grant in self._perms.writes:
-            if grant.mode is self._mode and within_any(path, (grant.root,)):
-                return grant
-        raise self._deny("escritura_no_autorizada", path)
+        grants = tuple(
+            grant
+            for grant in self._perms.writes
+            if grant.mode is self._mode and within_any(path, (grant.root,))
+        )
+        if not grants:
+            raise self._deny("escritura_no_autorizada", path)
+        return grants
 
     def write(self, path: VaultPath, text: str, *, expected: Version | None) -> Version:
-        grant = self._grant_for(path)
-        if grant.mode is WriteMode.CREAR:
+        grants = self._grants_for(path)
+        if self._mode is WriteMode.CREAR:
             if expected is not None:
                 raise self._deny("crear_no_edita", path)
             return self._inner.write(path, text, expected=None)
@@ -95,6 +99,10 @@ class PolicyVault:
         current = self._inner.read(path)
         if current.version != expected:
             raise VersionConflictError(f"{path} cambió desde la última lectura")
-        if grant.section is None or not only_inserted_in_section(current.text, text, grant.section):
+        if not any(
+            grant.section is not None
+            and only_inserted_in_section(current.text, text, grant.section)
+            for grant in grants
+        ):
             raise self._deny("fuera_de_seccion", path)
         return self._inner.write(path, text, expected=expected)

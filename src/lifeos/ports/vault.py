@@ -19,6 +19,8 @@ _INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp", "Zs
 MAX_COMPONENT_LENGTH = 255
 MAX_PATH_LENGTH = 1024
 _SHA256_HEX = re.compile(r"[0-9a-f]{64}")
+# `ARCHIV~1` es un alias de `Archivo` en NTFS: compararía distinto y apuntaría al mismo sitio.
+_SHORT_NAME_RE = re.compile(r"~\d")
 
 
 class VaultError(LifeOSError):
@@ -61,6 +63,8 @@ def _check_component(raw: str, part: str) -> None:
         raise PathRejectedError(raw, 'carácter no permitido (\\, :, *, ?, ", <, >, | o control)')
     if any(c != " " and unicodedata.category(c) in _INVISIBLE_CATEGORIES for c in part):
         raise PathRejectedError(raw, "contiene caracteres invisibles o separadores especiales")
+    if _SHORT_NAME_RE.search(part):
+        raise PathRejectedError(raw, "parece un alias corto 8.3 de Windows (~N)")
     if part[-1] in {".", " "}:
         raise PathRejectedError(raw, "un componente no puede terminar en punto o espacio")
     # NFKC convierte variantes visuales (CON de ancho completo, COM con superíndice)

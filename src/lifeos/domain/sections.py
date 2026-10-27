@@ -14,6 +14,10 @@ from lifeos.domain.note import BOM, split_lines
 _SECTION_HEADING_RE = re.compile(r"^##[ \t]+(.+?)[ \t#]*$")
 _BOUNDARY_RE = re.compile(r"^#{1,2}[ \t]")
 _FENCE_PREFIXES = ("```", "~~~")
+# Líneas que cambiarían la estructura o los datos de la nota si se anexaran: tareas, campos en
+# línea y reglas `---`/`===` (que convierten la línea anterior en título).
+_TASK_RE = re.compile(r"^\s*[-*+]\s+\[[^\]]?\]")
+_RULE_RE = re.compile(r"^\s*(=+|-{2,}|(\*\s*){3,}|(_\s*){3,})\s*$")
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,6 +48,10 @@ def _structural_lines(lines: Sequence[str]) -> list[tuple[int, str]]:
         if not in_fence:
             visible.append((index, line))
     return visible
+
+
+def _ends_inside_fence(lines: Sequence[str]) -> bool:
+    return sum(1 for line in lines if _is_fence(line)) % 2 == 1
 
 
 def _find(lines: Sequence[str], heading: str) -> SectionSpan | None:
@@ -81,7 +89,14 @@ def section_insert_index(text: str, span: SectionSpan) -> int:
 
 
 def _is_structural(line: str) -> bool:
-    return line.lstrip().startswith("#") or _is_fence(line)
+    """Línea que no puede anexarse: título, valla, regla, tarea o campo en línea."""
+    return (
+        line.lstrip().startswith("#")
+        or _is_fence(line)
+        or bool(_RULE_RE.match(line))
+        or bool(_TASK_RE.match(line))
+        or "::" in line
+    )
 
 
 def _is_new_section_block(block: Sequence[str], heading: str) -> bool:
@@ -115,7 +130,8 @@ def only_inserted_in_section(old: str, new: str, heading: str) -> bool:
             continue
         block = new_lines[position : position + added]
         if span is None:
-            if position == len(old_lines) and _is_new_section_block(block, heading):
+            appendable = position == len(old_lines) and not _ends_inside_fence(old_lines)
+            if appendable and _is_new_section_block(block, heading):
                 return True
         elif span.heading_index < position <= span.end and not any(map(_is_structural, block)):
             return True

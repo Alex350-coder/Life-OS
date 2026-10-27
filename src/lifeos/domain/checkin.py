@@ -25,7 +25,7 @@ class CheckInEntry:
     def __post_init__(self) -> None:
         cleaned = self.text.strip()
         if not cleaned:
-            raise ValidationError("check-in", self.text, "no puede estar vacío")
+            raise ValidationError("check-in", "", "no puede estar vacío")
         if len(cleaned) > MAX_CHECKIN_CHARS:
             raise ValidationError(
                 "check-in", len(cleaned), f"máximo {MAX_CHECKIN_CHARS} caracteres"

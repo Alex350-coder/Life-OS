@@ -50,8 +50,12 @@ def read_dotenv(path: Path) -> dict[str, str]:
         return {}
     if len(data) > MAX_DOTENV_BYTES:
         raise ValueError(f"{path.name}: supera {MAX_DOTENV_BYTES} bytes")
+    try:
+        text = data.decode("utf-8-sig")  # el Bloc de notas de Windows añade BOM
+    except UnicodeDecodeError:
+        raise ValueError(f"{path.name}: no está codificado en UTF-8") from None
     values: dict[str, str] = {}
-    for number, line in enumerate(data.decode("utf-8").splitlines(), start=1):
+    for number, line in enumerate(text.splitlines(), start=1):
         stripped = line.strip()
         if not stripped or stripped.startswith("#"):
             continue
@@ -59,6 +63,8 @@ def read_dotenv(path: Path) -> dict[str, str]:
         if match is None:
             raise ValueError(f"{path.name}: línea {number} no tiene el formato CLAVE=valor")
         key, double, single, plain = match.groups()
+        if key in values:
+            raise ValueError(f"{path.name}: línea {number} repite una clave (duplicada)")
         values[key] = next(v for v in (double, single, plain) if v is not None)
     return values
 
