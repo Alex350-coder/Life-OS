@@ -4,8 +4,11 @@ version = "0.1.0"
 description = "Life OS: planificación personal con agentes sobre una bóveda de Obsidian."
 authors = [{ name = "Alexander" }]
 requires-python = ">=3.12"
-# Fase 1: solo biblioteca estándar en tiempo de ejecución.
-dependencies = []
+# Fase 2 (ADR-0007): PyYAML y Pydantic, usados solo en `adapters` (tests/test_architecture.py).
+dependencies = [
+    "pydantic>=2.9,<3",
+    "pyyaml>=6.0.2,<7",
+]
 
 [build-system]
 requires = ["uv_build>=0.11.18,<0.12.0"]
@@ -13,11 +16,12 @@ build-backend = "uv_build"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
-addopts = ["--strict-markers", "--import-mode=importlib"]
+addopts = ["--strict-markers", "--import-mode=importlib", "-m", "not live"]
 markers = [
     "unit: pruebas de dominio y reglas puras",
     "integration: pruebas contra una bóveda temporal en disco",
     "security: pruebas negativas de controles SEC-xx",
+    "live: llamada real al proveedor; requiere NVIDIA_API_KEY y se ejecuta solo a mano",
 ]
 
 [tool.coverage.run]
@@ -38,9 +42,11 @@ select = ["E", "F", "W", "I", "B", "UP", "S", "SIM", "RUF", "PTH", "T20"]
 
 [tool.ruff.lint.per-file-ignores]
 "tests/**" = ["S101"]
+"scripts/**" = ["T20"]
 
 [tool.mypy]
 strict = true
+plugins = ["pydantic.mypy"]
 python_version = "3.12"
 files = ["src", "tests"]
 
@@ -54,4 +60,5 @@ dev = [
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",
     "ruff>=0.17.2",
+    "types-pyyaml>=6.0.12.20260906",
 ]

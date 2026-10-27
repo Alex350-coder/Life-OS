@@ -14,6 +14,16 @@ ALLOWED = {
     "application": {"domain", "ports", "application"},
     "adapters": {"domain", "ports", "adapters"},
 }
+# Dependencias de terceros permitidas por capa (ADR-0007). Dominio, puertos y aplicación no
+# conocen PyYAML ni Pydantic: los adaptadores devuelven tipos propios ya validados.
+THIRD_PARTY = {
+    "domain": set(),
+    "ports": set(),
+    "application": set(),
+    "adapters": {"yaml", "pydantic"},
+}
+# Raíz de composición: único módulo que conecta capas (incluidos los adaptadores).
+COMPOSITION_ROOT = "bootstrap.py"
 
 pytestmark = pytest.mark.unit
 
@@ -40,19 +50,43 @@ def test_layer_only_imports_allowed_layers(layer: str) -> None:
     assert violations == set()
 
 
-def test_runtime_has_no_third_party_dependencies() -> None:
+def _third_party_imports(path: Path) -> set[str]:
     stdlib_or_local = {*__import__("sys").stdlib_module_names, "lifeos"}
-    third_party: set[str] = set()
-    for path in SRC.rglob("*.py"):
-        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
-            if isinstance(node, ast.Import):
-                roots = [alias.name.split(".")[0] for alias in node.names]
-            elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
-                roots = [node.module.split(".")[0]]
-            else:
-                continue
-            third_party.update(root for root in roots if root not in stdlib_or_local)
-    assert third_party == set()
+    found: set[str] = set()
+    for node in ast.walk(ast.parse(path.read_text(encoding="utf-8"))):
+        if isinstance(node, ast.Import):
+            roots = [alias.name.split(".")[0] for alias in node.names]
+        elif isinstance(node, ast.ImportFrom) and node.module and node.level == 0:
+            roots = [node.module.split(".")[0]]
+        else:
+            continue
+        found.update(root for root in roots if root not in stdlib_or_local)
+    return found
+
+
+@pytest.mark.parametrize("layer", sorted(THIRD_PARTY))
+def test_layer_uses_only_allowed_third_party_packages(layer: str) -> None:
+    violations = {
+        f"{path.relative_to(SRC)} -> {package}"
+        for path in (SRC / layer).rglob("*.py")
+        for package in _third_party_imports(path) - THIRD_PARTY[layer]
+    }
+    assert violations == set()
+
+
+def test_only_known_modules_live_at_package_root() -> None:
+    # Un módulo suelto en lifeos/ escaparía a las comprobaciones por capa.
+    loose = {p.name for p in SRC.glob("*.py")} - {"__init__.py", COMPOSITION_ROOT}
+    assert loose == set()
+    assert {p.name for p in SRC.iterdir() if p.is_dir() and p.name != "__pycache__"} <= {
+        *ALLOWED,
+    }
+
+
+def test_composition_root_has_no_third_party_imports() -> None:
+    root = SRC / COMPOSITION_ROOT
+    if root.exists():
+        assert _third_party_imports(root) == set()
 
 
 def test_source_uses_only_absolute_imports() -> None:

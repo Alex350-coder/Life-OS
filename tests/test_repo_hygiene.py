@@ -21,7 +21,9 @@ def _git(*args: str) -> subprocess.CompletedProcess[str]:
     )
 
 
-@pytest.mark.parametrize("name", [".env", ".env.local", "secrets/token.txt", "logs/app.log"])
+@pytest.mark.parametrize(
+    "name", [".env", ".env.local", "secrets/token.txt", "logs/app.log", "logs/usage-2026-10.jsonl"]
+)
 def test_sensitive_paths_are_git_ignored(name: str) -> None:
     assert _git("check-ignore", "-q", name).returncode == 0
 
