@@ -4,6 +4,7 @@ from collections.abc import Callable
 from typing import Any
 
 import pytest
+
 from lifeos.adapters.yaml_config import parse_agent, parse_catalog, parse_policy
 from lifeos.application.permissions import (
     TOOL_WRITE_MODES,
@@ -11,7 +12,6 @@ from lifeos.application.permissions import (
     resolve_effective,
 )
 from lifeos.ports.config import ConfigRejectedError, WriteGrant, WriteMode
-
 from lifeos.ports.vault import VaultPath
 from tests import config_samples as samples
 

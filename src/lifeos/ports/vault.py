@@ -2,6 +2,7 @@
 
 import re
 import unicodedata
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Protocol
 
@@ -115,6 +116,17 @@ class VaultPath:
 
     def __str__(self) -> str:
         return self.value
+
+
+def _folded(path: VaultPath) -> tuple[str, ...]:
+    # Windows y macOS no distinguen mayúsculas ni la forma Unicode (NFC/NFD) de los nombres.
+    return tuple(unicodedata.normalize("NFC", part).casefold() for part in path.parts)
+
+
+def within_any(path: VaultPath, roots: Iterable[VaultPath]) -> bool:
+    """`path` es alguna de las raíces o está dentro de ella, comparando componentes completos."""
+    parts = _folded(path)
+    return any(parts[: len(root.parts)] == _folded(root) for root in roots)
 
 
 @dataclass(frozen=True, slots=True)

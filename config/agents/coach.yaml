@@ -1,0 +1,24 @@
+# Agente Coach (docs/specs/agente-coach.md, ADR-0004). Este archivo SOLICITA; la política decide.
+schema_version: 1
+id: coach
+nombre: Coach
+version: 1
+proposito: "Acompañar la ejecución del plan con check-ins breves y sin culpa."
+modelo_solicitado:
+  perfil: ligero
+contrato:
+  entrada: checkin_v1
+  salida: checkin_v1
+herramientas: [leer_nota, listar_tareas, crear_captura, anexar_checkin]
+permisos_solicitados:
+  lectura:
+    - _sistema/
+    - Semanal/
+    - Diario/
+  escritura:
+    - ruta: 00-Inbox/
+      modo: crear
+    - ruta: Diario/
+      modo: anexar_seccion
+      seccion: check-ins
+metricas: [checkins_registrados]

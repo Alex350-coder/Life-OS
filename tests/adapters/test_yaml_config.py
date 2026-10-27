@@ -1,10 +1,12 @@
 """SEC-06: la configuración es dato, nunca código. Etiquetas, anclas y claves extra se rechazan."""
 
+import copy
 from datetime import date
 from decimal import Decimal
 from pathlib import Path
 
 import pytest
+
 from lifeos.adapters.yaml_config import (
     MAX_CONFIG_BYTES,
     YamlConfigSource,
@@ -14,7 +16,6 @@ from lifeos.adapters.yaml_config import (
     strict_load,
 )
 from lifeos.ports.config import ConfigSyntaxError, WriteGrant, WriteMode
-
 from lifeos.ports.vault import VaultPath
 from tests import config_samples as samples
 
@@ -118,7 +119,10 @@ def test_parse_policy_converts_to_port_types() -> None:
         (lambda d: d["agentes"]["coach"]["lectura"].append("../fuera/"), "lectura"),
         (lambda d: d["agentes"]["coach"]["lectura"].append("/"), "lectura"),
         (lambda d: d["agentes"]["coach"]["lectura"].append("C:/x/"), "lectura"),
-        (lambda d: d["agentes"].update({"Coach Mayus": d["agentes"]["coach"]}), "agentes"),
+        (
+            lambda d: d["agentes"].update({"Coach Mayus": copy.deepcopy(d["agentes"]["coach"])}),
+            "agentes",
+        ),
     ],
 )
 def test_parse_policy_rejects_unknown_keys_and_invalid_values(
@@ -248,7 +252,7 @@ def test_parse_agent_records_hash_and_requested_permissions() -> None:
         (lambda d: d.update(id="Coach!"), "id"),
         (lambda d: d.update(version=0), "version"),
         (lambda d: d.update(version="1"), "version"),
-        (lambda d: d["herramientas"].append("shell"), "herramientas"),
+        (lambda d: d["herramientas"].append("Shell Exec!"), "herramientas"),
         (lambda d: d["permisos_solicitados"]["escritura"][1].pop("seccion"), "seccion"),
         (lambda d: d["permisos_solicitados"]["escritura"][0].update(seccion="x"), "seccion"),
     ],

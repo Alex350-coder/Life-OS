@@ -1,0 +1,26 @@
+# Catálogo de modelos (ADR-0007). Sin secretos: api_key_env es el NOMBRE de la variable.
+# Los agentes referencian perfiles, no modelos: cambiar de modelo es editar esta línea.
+schema_version: 1
+
+proveedores:
+  nvidia:
+    base_url: https://integrate.api.nvidia.com/v1
+    api_key_env: NVIDIA_API_KEY
+
+perfiles:
+  grande:
+    proveedor: nvidia
+    modelo: mistralai/mistral-large-2-instruct   # candidato; se confirma con la llamada real
+    timeout_s: 60
+    max_tokens: 2048
+  ligero:
+    proveedor: nvidia
+    modelo: google/gemma-3-12b-it                # candidato; se confirma con la llamada real
+    timeout_s: 30
+    max_tokens: 1024
+
+# Sin tarifas fechadas, el costo se registra como "desconocido" (nunca 0). El nivel gratuito
+# de NVIDIA no publica una tarifa por token.
+tarifas:
+  fecha_tarifa: null
+  modelos: {}

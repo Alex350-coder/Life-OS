@@ -3,10 +3,10 @@
 from pathlib import Path
 
 import pytest
+
 from lifeos.adapters.yaml_config import YamlConfigSource
 from lifeos.application.permissions import TOOL_WRITE_MODES, resolve_effective
 from lifeos.ports.config import WriteMode
-
 from lifeos.ports.vault import VaultPath, within_any
 from tests.config_samples import KNOWN_CONTRACTS
 
