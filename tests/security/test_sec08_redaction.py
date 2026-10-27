@@ -9,8 +9,8 @@ import logging
 from pathlib import Path
 
 import pytest
-from lifeos.adapters.jsonl_logs import JsonlUsageLog
 
+from lifeos.adapters.jsonl_logs import JsonlUsageLog
 from lifeos.adapters.nvidia_llm import NvidiaChatClient
 from lifeos.adapters.secrets import Secret
 from lifeos.adapters.system_clock import SystemClock
@@ -72,9 +72,9 @@ def test_api_key_never_reaches_logs_or_errors(
     assert KEY not in logged
     assert "Bearer" not in logged
     assert KEY not in caplog.text
-    for error in errors:
-        assert KEY not in str(error)
-        assert KEY not in repr(error)
-        assert error.__cause__ is None
+    for raised in errors:
+        assert KEY not in str(raised)
+        assert KEY not in repr(raised)
+        assert raised.__cause__ is None
     # La clave sí viajó al proveedor: el control está en lo que se registra, no en no enviarla.
     assert stub_server.received[0].headers["Authorization"] == f"Bearer {KEY}"

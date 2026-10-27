@@ -18,5 +18,5 @@ def test_system_clock_returns_aware_times_in_its_zone() -> None:
 def test_system_clock_monotonic_advances_after_sleep() -> None:
     clock = SystemClock()
     before = clock.monotonic()
-    clock.sleep(0.01)
+    clock.sleep(0.05)  # el reloj monotónico de Windows avanza en pasos de ~15 ms
     assert clock.monotonic() > before
