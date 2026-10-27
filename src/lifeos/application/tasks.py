@@ -177,9 +177,14 @@ def find_task(vault: VaultStore, task_id: TaskId) -> LocatedTask:
 # --- Escritura --------------------------------------------------------------------------------
 
 
-def check_writable(path: VaultPath) -> None:
-    """Rechaza carpetas protegidas (sin distinguir mayúsculas) y archivos que no son notas."""
-    if within_any(path, DEFAULT_PROTECTED_ROOTS):
+def check_writable(
+    path: VaultPath, protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS
+) -> None:
+    """Rechaza carpetas protegidas (sin distinguir mayúsculas) y archivos que no son notas.
+
+    `protected` lo calcula la raíz de composición con `permissions.protected_roots(policy)`.
+    """
+    if within_any(path, protected):
         raise ApplicationError(f"{path} está en una carpeta protegida")
     if not path.name.lower().endswith(NOTE_SUFFIX):
         raise ApplicationError(f"{path} no es una nota Markdown")
@@ -259,9 +264,10 @@ def create_task(
     due: date | None = None,
     scheduled: date | None = None,
     priority: Priority = Priority.MEDIA,
+    protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS,
 ) -> LocatedTask:
     """Crea una tarea con id único al final de la nota indicada."""
-    check_writable(path)
+    check_writable(path, protected)
     task_id = new_unique_task_id(_taken_ids(vault))
     line = _render_new_task(
         title, task_id, area, effort, due=due, scheduled=scheduled, priority=priority
@@ -300,9 +306,15 @@ def update_task(
     return _rewrite_line(vault, located.path, located.index, transform)
 
 
-def ensure_id(vault: VaultStore, path: VaultPath, index: int) -> LocatedTask:
+def ensure_id(
+    vault: VaultStore,
+    path: VaultPath,
+    index: int,
+    *,
+    protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS,
+) -> LocatedTask:
     """Asigna un id estable a la tarea de esa línea si no lo tiene; si ya lo tiene, no escribe."""
-    check_writable(path)
+    check_writable(path, protected)
     lines = {item.index: item.line for item in parse_note(vault.read(path).text).tasks}
     if index not in lines:
         raise TaskNotFoundError(f"la línea {index + 1} de {path} no es una tarea")

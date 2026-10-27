@@ -3,12 +3,12 @@
 from datetime import time
 
 import pytest
-from lifeos.application.policy_vault import PermissionDeniedError
-from lifeos.application.tools import ActorContext, ToolRegistry
-from lifeos.domain.checkin import CheckInEntry
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
+from lifeos.application.policy_vault import PermissionDeniedError
 from lifeos.application.tasks import TaskQuery
+from lifeos.application.tools import ActorContext, ToolRegistry
+from lifeos.domain.checkin import CheckInEntry
 from lifeos.ports.logs import AuditResult, LogWriteError
 from lifeos.ports.vault import NoteNotFoundError, VaultPath
 from tests import config_samples as samples
@@ -58,7 +58,7 @@ def test_listar_tareas_only_sees_readable_notes(
     write_note("01-Universidad/redes.md", task)
     write_note("Diario/2026-10-27.md", task.replace("t-222222", "t-333333"))
     tools = _registry(vault)
-    coach_ids = [t.task.id for t in tools.listar_tareas(COACH, TaskQuery())]
+    coach_ids = [str(t.task.id) for t in tools.listar_tareas(COACH, TaskQuery())]
     jefe_ids = [t.task.id for t in tools.listar_tareas(JEFE, TaskQuery())]
     assert coach_ids == ["t-333333"]
     assert sorted(str(i) for i in jefe_ids) == ["t-222222", "t-333333"]

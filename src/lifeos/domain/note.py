@@ -106,3 +106,19 @@ def append_line(text: str, content: str) -> str:
     newline = CRLF if CRLF in text else LF
     separator = newline if text and not text.endswith(LF) else ""
     return f"{text}{separator}{content}{newline}"
+
+
+def insert_line(text: str, index: int, content: str) -> str:
+    """Inserta `content` antes de la línea `index`; con `index` igual al total, al final."""
+    _check_single_line(content)
+    pairs = _split(text)
+    if index == len(pairs):
+        return append_line(text, content)
+    _check_index(pairs, index)
+    newline = CRLF if CRLF in text else LF
+    if index == 0 and pairs[0][0].startswith(BOM):
+        first, ending = pairs[0]
+        pairs[0] = (first.removeprefix(BOM), ending)
+        content = BOM + content
+    pairs.insert(index, (content, newline))
+    return _join(pairs)

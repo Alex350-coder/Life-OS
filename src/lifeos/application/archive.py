@@ -9,6 +9,7 @@ de descartar cambios. Nunca se borran archivos.
 
 from lifeos.application.tasks import (
     ARCHIVE_ROOT,
+    DEFAULT_PROTECTED_ROOTS,
     ApplicationError,
     LocatedTask,
     TaskNotFoundError,
@@ -78,13 +79,18 @@ def archive_task(vault: VaultStore, task_id: TaskId) -> VaultPath:
     return target
 
 
-def restore_task(vault: VaultStore, task_id: TaskId) -> VaultPath:
+def restore_task(
+    vault: VaultStore,
+    task_id: TaskId,
+    *,
+    protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS,
+) -> VaultPath:
     active, archived = _occurrences(vault, task_id)
     if not archived:
         raise TaskNotFoundError(f"la tarea {task_id} no está archivada")
     entry = _single(task_id, archived)
     original = entry.path.relative_to(ARCHIVE_ROOT)
-    check_writable(original)
+    check_writable(original, protected)
     _move(vault, entry, original, active)
     return original
 

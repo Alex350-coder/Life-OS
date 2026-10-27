@@ -112,7 +112,7 @@ def jefe() -> dict[str, Any]:
         "contrato": {"entrada": "captura_v1", "salida": "captura_v1"},
         "herramientas": ["leer_nota", "listar_tareas", "crear_captura"],
         "permisos_solicitados": {
-            "lectura": ["_sistema/", "00-Inbox/", "Semanal/", "Diario/"],
+            "lectura": ["_sistema/", "00-Inbox/", "01-Universidad/", "Semanal/", "Diario/"],
             "escritura": [{"ruta": "00-Inbox/", "modo": "crear"}],
         },
         "metricas": [],
