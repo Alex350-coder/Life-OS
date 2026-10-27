@@ -4,9 +4,17 @@ Cada función devuelve un diccionario nuevo para que las pruebas puedan modifica
 afectar a otras. `dump` lo serializa a YAML plano (sin etiquetas ni anclas).
 """
 
+from collections.abc import Mapping
 from typing import Any
 
 import yaml
+
+from lifeos.adapters.yaml_config import parse_agent, parse_catalog, parse_policy
+from lifeos.application.permissions import (
+    TOOL_WRITE_MODES,
+    EffectivePermissions,
+    resolve_effective,
+)
 
 KNOWN_CONTRACTS = frozenset({"captura_v1", "checkin_v1"})
 
@@ -109,3 +117,14 @@ def jefe() -> dict[str, Any]:
         },
         "metricas": [],
     }
+
+
+def effective() -> Mapping[str, EffectivePermissions]:
+    """Permisos efectivos de Jefe y Coach con la política y el catálogo de prueba."""
+    return resolve_effective(
+        parse_policy(dump(policy()).encode()),
+        parse_catalog(dump(catalog()).encode()),
+        (parse_agent(dump(jefe()).encode()), parse_agent(dump(coach()).encode())),
+        tools=TOOL_WRITE_MODES,
+        contracts=KNOWN_CONTRACTS,
+    )
