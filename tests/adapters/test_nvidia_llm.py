@@ -18,7 +18,7 @@ from lifeos.ports.llm import (
     LlmResponseError,
     LlmTimeoutError,
 )
-from tests.adapters.conftest import Reply, StubServer
+from tests.stub_http import Reply, StubServer
 
 # Se compone en dos partes para que el archivo no contenga un patrón de clave real.
 FAKE_KEY = "nvapi" + "-TESTKEY-0123456789abcdefXYZ"

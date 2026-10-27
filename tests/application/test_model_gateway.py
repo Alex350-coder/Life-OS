@@ -16,7 +16,7 @@ from lifeos.ports.llm import (
     LlmTimeoutError,
 )
 from tests import config_samples as samples
-from tests.fakes import FakeClock, FakeLlmClient, ok_response
+from tests.fakes import FakeClock, FakeLlmClient, MemoryUsageLog, ok_response
 
 pytestmark = [pytest.mark.unit]
 
@@ -31,7 +31,12 @@ def _gateway(
     client = FakeLlmClient(script=list(script), clock=clock)  # type: ignore[arg-type]
     catalog = parse_catalog(samples.dump(samples.catalog()).encode())
     gateway = ModelGateway(
-        {"nvidia": client}, catalog, clock, retry=retry or RetryPolicy(), jitter=lambda: 0.0
+        {"nvidia": client},
+        catalog,
+        clock,
+        MemoryUsageLog(),
+        retry=retry or RetryPolicy(),
+        jitter=lambda: 0.0,
     )
     return gateway, client, clock
 
@@ -155,7 +160,9 @@ def test_jitter_only_lengthens_backoff_within_bounds() -> None:
     clock = FakeClock()
     error = LlmProviderError("caído", status=503, retryable=True)
     client = FakeLlmClient(script=[error, ok_response()], clock=clock)
-    gateway = ModelGateway({"nvidia": client}, catalog, clock, jitter=lambda: 0.999)
+    gateway = ModelGateway(
+        {"nvidia": client}, catalog, clock, MemoryUsageLog(), jitter=lambda: 0.999
+    )
     gateway.complete(CTX, MESSAGES)
     assert 1.0 <= clock.sleeps[0] <= 1.5
 

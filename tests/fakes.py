@@ -4,6 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
+from lifeos.ports.logs import AuditRecord, AuditResult, LogWriteError, UsageRecord
+
 from lifeos.ports.llm import LlmError, LlmRequest, LlmResponse, TokenUsage
 
 FIXED_NOW = datetime(2026, 10, 27, 9, 30, tzinfo=UTC)
@@ -73,3 +75,27 @@ class FakeLlmClient:
         if isinstance(step, LlmResponse):
             return step
         return step(request)
+
+
+@dataclass
+class MemoryUsageLog:
+    """Registro de uso en memoria; `fail` simula un disco bloqueado (p. ej., OneDrive)."""
+
+    records: list[UsageRecord] = field(default_factory=list)
+    fail: bool = False
+
+    def append(self, record: UsageRecord) -> None:
+        if self.fail:
+            raise LogWriteError("registro de uso no disponible")
+        self.records.append(record)
+
+
+@dataclass
+class MemoryAuditLog:
+    records: list[AuditRecord] = field(default_factory=list)
+    fail_on: AuditResult | None = None
+
+    def append(self, record: AuditRecord) -> None:
+        if record.result is self.fail_on:
+            raise LogWriteError("auditoría no disponible")
+        self.records.append(record)
