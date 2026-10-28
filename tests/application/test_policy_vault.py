@@ -119,13 +119,6 @@ def test_append_mode_cannot_create_notes_and_detects_concurrent_edits(
         coach.write(_path(DAILY), DAILY_TEXT + "- 09:00 — x\n", expected=stale)
 
 
-def test_plan_mode_is_refused_until_phase_3(vault: FilesystemVault) -> None:
-    jefe = PolicyVault(vault, samples.effective()["jefe"], WriteMode.PLAN)
-    with pytest.raises(PermissionDeniedError) as info:
-        jefe.write(_path("Semanal/2026-W44.md"), "plan\n", expected=None)
-    assert info.value.reason == "plan_no_disponible"
-
-
 def test_jefe_cannot_write_plan_folders_through_other_modes(vault: FilesystemVault) -> None:
     for mode in (WriteMode.CREAR, WriteMode.ANEXAR_SECCION):
         jefe = PolicyVault(vault, samples.effective()["jefe"], mode)

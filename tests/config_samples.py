@@ -33,7 +33,7 @@ def policy() -> dict[str, Any]:
         },
         "agentes": {
             "jefe": {
-                "herramientas": ["leer_nota", "listar_tareas", "crear_captura"],
+                "herramientas": ["leer_nota", "listar_tareas", "crear_captura", "publicar_plan"],
                 "lectura": ["_sistema/", "00-Inbox/", "01-Universidad/", "Semanal/", "Diario/"],
                 "escritura": [
                     {"ruta": "Semanal/", "modo": "plan"},
@@ -110,7 +110,7 @@ def jefe() -> dict[str, Any]:
         "proposito": "Consolidar el plan.",
         "modelo_solicitado": {"perfil": "grande"},
         "contrato": {"entrada": "captura_v1", "salida": "captura_v1"},
-        "herramientas": ["leer_nota", "listar_tareas", "crear_captura"],
+        "herramientas": ["leer_nota", "listar_tareas", "crear_captura", "publicar_plan"],
         "permisos_solicitados": {
             "lectura": ["_sistema/", "00-Inbox/", "01-Universidad/", "Semanal/", "Diario/"],
             "escritura": [{"ruta": "00-Inbox/", "modo": "crear"}],
