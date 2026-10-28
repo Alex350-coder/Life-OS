@@ -10,7 +10,6 @@ from lifeos.domain.note import parse_note
 from lifeos.domain.plan import Block, BlockKind, PlanOrigin, PlanProposal, PlanStatus
 from lifeos.domain.plan_note import (
     PlanNoteError,
-    approve_weekly,
     daily_path,
     parse_daily_blocks,
     parse_weekly,
@@ -94,24 +93,20 @@ def test_titles_are_sanitized_to_one_inert_line(title: str) -> None:
     assert parse_note(text).tasks == ()
 
 
-def test_approve_changes_only_the_status() -> None:
-    text = weekly()
-    approved = approve_weekly(text, approved_at=datetime(2026, 11, 1, 21, 0, tzinfo=LIMA))
-    parsed = parse_weekly(approved)
-    assert parsed.status is PlanStatus.APROBADO
-    assert Counter(parsed.blocks) == Counter(parse_weekly(text).blocks)
-    assert (
-        approved.replace("estado_plan: aprobado", "estado_plan: propuesto").replace(
-            "aprobado: 2026-11-01T21:00:00-05:00\n", ""
-        )
-        == text
+def test_approved_note_records_status_and_time_and_keeps_blocks() -> None:
+    approved_at = datetime(2026, 11, 1, 21, 0, tzinfo=LIMA)
+    ctx = context(task(A), task(B))
+    text = render_weekly(
+        proposal(), ctx, status=PlanStatus.APROBADO, generated=NOW, approved_at=approved_at
     )
+    parsed = parse_weekly(text)
+    assert parsed.status is PlanStatus.APROBADO
+    assert "aprobado: 2026-11-01T21:00:00-05:00" in text
+    assert Counter(parsed.blocks) == Counter(parse_weekly(weekly()).blocks)
 
 
-def test_approve_twice_is_an_error() -> None:
-    approved = approve_weekly(weekly(), approved_at=NOW)
-    with pytest.raises(PlanNoteError):
-        approve_weekly(approved, approved_at=NOW)
+def test_justification_round_trips() -> None:
+    assert parse_weekly(weekly()).justification == proposal().justification
 
 
 def test_daily_note_contains_only_its_day_and_round_trips() -> None:

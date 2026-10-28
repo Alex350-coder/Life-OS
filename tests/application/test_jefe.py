@@ -29,7 +29,7 @@ from lifeos.domain.plan import (
     PlanStatus,
     fixed_and_protected_blocks,
 )
-from lifeos.domain.plan_note import parse_weekly, render_weekly
+from lifeos.domain.plan_note import parse_weekly
 from lifeos.ports.logs import AuditResult
 from lifeos.ports.vault import VaultPath
 from tests import config_samples as samples
@@ -244,8 +244,9 @@ def test_malformed_plan_note_fails_closed_at_approval(
 def _publication(planner: JefePlanner) -> PlanPublication:
     context = planner.context(WEEK)
     proposal = PlanProposal(week=WEEK, blocks=fixed_and_protected_blocks(context))
-    text = render_weekly(proposal, context, status=PlanStatus.PROPUESTO, generated=NOW)
-    return PlanPublication(proposal=proposal, context=context, weekly=(WEEKLY, text, None))
+    return PlanPublication(
+        proposal=proposal, context=context, status=PlanStatus.PROPUESTO, generated=NOW
+    )
 
 
 def test_coach_cannot_publish_a_plan(
@@ -260,26 +261,23 @@ def test_coach_cannot_publish_a_plan(
     )
 
 
-def test_publication_text_must_match_the_validated_plan(
+def test_the_tool_renders_the_text_itself(
     planner: JefePlanner, tools: ToolRegistry, vault: FilesystemVault
 ) -> None:
-    publication = _publication(planner)
-    path, text, expected = publication.weekly
-    sneaky = text.replace(
-        "### lun 2026-11-02\n", "### lun 2026-11-02\n- 08:00–09:00 · Colada [id:: t-aaaaaa]\n"
-    )
+    # El llamador no aporta texto: lo que se escribe es siempre el render del plan validado.
+    paths = tools.publicar_plan(planner.new_actor(), _publication(planner))
+    assert paths == (WEEKLY,)
+    note = parse_weekly(vault.read(WEEKLY).text)
+    assert note.status is PlanStatus.PROPUESTO
+
+
+def test_approved_publication_requires_the_approval_time(
+    planner: JefePlanner, tools: ToolRegistry, vault: FilesystemVault
+) -> None:
+    approved = replace(_publication(planner), status=PlanStatus.APROBADO)
     with pytest.raises(PublicationMismatchError):
-        tools.publicar_plan(planner.actor, replace(publication, weekly=(path, sneaky, expected)))
+        tools.publicar_plan(planner.new_actor(), approved)
     assert not vault.exists(WEEKLY)
-
-
-def test_daily_notes_are_only_published_with_an_approved_plan(
-    planner: JefePlanner, tools: ToolRegistry, vault: FilesystemVault
-) -> None:
-    publication = _publication(planner)
-    daily = (MONDAY_NOTE, "---\ntipo: diario\n---\n", None)
-    with pytest.raises(PublicationMismatchError):
-        tools.publicar_plan(planner.actor, replace(publication, daily=(daily,)))
     assert not vault.exists(MONDAY_NOTE)
 
 
@@ -293,11 +291,12 @@ def test_tool_validates_even_when_called_directly(
             Block(BlockKind.TRABAJO, "Fuera de horario", span(MON, "21:00–22:00"), tid("t-bbbbbb")),
         ),
     )
-    text = render_weekly(bad, context, status=PlanStatus.PROPUESTO, generated=NOW)
     with pytest.raises(PlanRejectedError) as info:
         tools.publicar_plan(
-            planner.actor,
-            PlanPublication(proposal=bad, context=context, weekly=(WEEKLY, text, None)),
+            planner.new_actor(),
+            PlanPublication(
+                proposal=bad, context=context, status=PlanStatus.PROPUESTO, generated=NOW
+            ),
         )
     assert ConflictCode.FIJO_ALTERADO in {c.code for c in info.value.conflicts}
     assert not vault.exists(WEEKLY)
