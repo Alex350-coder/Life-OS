@@ -36,8 +36,9 @@ _DATE_FIELDS: Final[Mapping[str, str]] = MappingProxyType(
     {DUE: "fecha límite", SCHEDULED: "fecha programada"}
 )
 _BOOLEANS: Final[Mapping[str, bool]] = MappingProxyType({"true": True, "false": False})
+_DIVISIBLE: Final[Mapping[str, bool]] = MappingProxyType({"sí": True, "si": True, "no": False})
 KNOWN_KEYS: Final = frozenset(
-    {"id", "area", "esfuerzo", "avance", "prioridad", "estado", "inferido"}
+    {"id", "area", "esfuerzo", "avance", "prioridad", "estado", "inferido", "depende", "divisible"}
 )
 
 
@@ -52,6 +53,8 @@ class _TaskFields(TypedDict, total=False):
     recurrence: str | None
     state: ExplicitState
     inferred: bool
+    depends_on: tuple[TaskId, ...]
+    divisible: bool
 
 
 @dataclass(frozen=True, slots=True)
@@ -129,6 +132,20 @@ def _parse_bool(text: str) -> bool:
         raise ValidationError("inferido", text, "se espera true o false") from None
 
 
+def _parse_dependencies(text: str) -> tuple[TaskId, ...]:
+    ids = tuple(TaskId(part.strip()) for part in text.split(","))
+    if len(set(ids)) != len(ids):
+        raise ValidationError("depende", text, "dependencia repetida")
+    return ids
+
+
+def _parse_divisible(text: str) -> bool:
+    try:
+        return _DIVISIBLE[text.strip().lower()]
+    except KeyError:
+        raise ValidationError("divisible", text, "se espera sí o no") from None
+
+
 def _apply(fields: _TaskFields, key: str, value: str) -> None:
     match key:
         case "id":
@@ -145,6 +162,10 @@ def _apply(fields: _TaskFields, key: str, value: str) -> None:
             fields["state"] = ExplicitState.parse(value)
         case "inferido":
             fields["inferred"] = _parse_bool(value)
+        case "depende":
+            fields["depends_on"] = _parse_dependencies(value)
+        case "divisible":
+            fields["divisible"] = _parse_divisible(value)
         case _ if key == DUE:
             fields["due"] = _parse_date(_DATE_FIELDS[DUE], value)
         case _ if key == SCHEDULED:

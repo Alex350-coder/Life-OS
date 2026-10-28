@@ -6,6 +6,7 @@ from decimal import Decimal
 from pathlib import Path
 
 import pytest
+
 from lifeos.adapters.jsonl_logs import JsonlAuditLog, JsonlUsageLog, purge_logs
 from lifeos.ports.logs import AuditRecord, AuditResult, CostStatus, LogWriteError, UsageRecord
 

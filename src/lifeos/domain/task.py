@@ -151,10 +151,17 @@ class Task:
     recurrence: str | None = None
     state: ExplicitState | None = None
     inferred: bool = False
+    # Planificación (planificador.md): tareas que deben terminar antes y si admite partirse.
+    depends_on: tuple[TaskId, ...] = ()
+    divisible: bool = True
 
     def __post_init__(self) -> None:
         if not self.title.strip():
             raise ValidationError("título", self.title, "no puede estar vacío")
+        if len(set(self.depends_on)) != len(self.depends_on):
+            raise ValidationError("depende", self.depends_on, "dependencia repetida")
+        if self.id is not None and self.id in self.depends_on:
+            raise ValidationError("depende", self.id.value, "una tarea no depende de sí misma")
 
     @property
     def status(self) -> TaskStatus:

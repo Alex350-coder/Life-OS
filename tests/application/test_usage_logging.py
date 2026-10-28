@@ -4,7 +4,6 @@ from decimal import Decimal
 from typing import Any
 
 import pytest
-from lifeos.ports.logs import CostStatus, LogWriteError
 
 from lifeos.adapters.yaml_config import parse_catalog
 from lifeos.application.llm_calls import CallContext, ModelGateway, estimate_cost
@@ -16,6 +15,7 @@ from lifeos.ports.llm import (
     LlmTimeoutError,
     TokenUsage,
 )
+from lifeos.ports.logs import CostStatus, LogWriteError
 from tests import config_samples as samples
 from tests.fakes import FakeClock, FakeLlmClient, MemoryUsageLog, ok_response
 

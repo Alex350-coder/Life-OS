@@ -3,8 +3,8 @@
 from datetime import time
 
 import pytest
-from lifeos.domain.checkin import MAX_CHECKIN_CHARS, CheckInEntry
 
+from lifeos.domain.checkin import MAX_CHECKIN_CHARS, CheckInEntry
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.task_line import parse_task_line
 

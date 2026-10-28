@@ -1,9 +1,9 @@
 """SEC-04 (núcleo): la bóveda con permisos aplica lectura, creación y anexado por agente."""
 
 import pytest
-from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
+from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.ports.config import WriteMode
 from lifeos.ports.vault import VaultPath, VersionConflictError
 from tests import config_samples as samples
