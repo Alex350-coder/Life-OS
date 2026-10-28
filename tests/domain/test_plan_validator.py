@@ -1,12 +1,17 @@
 """Validador determinista de planes (F3-T02, SEC-09: un plan inválido se rechaza)."""
 
+from collections import Counter
+from datetime import UTC, timedelta
+
 import pytest
 
+from lifeos.domain.capacity import Interval
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.plan import (
     Block,
     BlockKind,
     ConflictCode,
+    PlanningContext,
     PlanProposal,
     fixed_and_protected_blocks,
 )
@@ -14,7 +19,6 @@ from lifeos.domain.plan_validator import validate_plan
 from tests.planning_builders import (
     FRI,
     MON,
-    NOW,
     SAT,
     THU,
     TUE,
@@ -39,7 +43,7 @@ BLOCKED = "- [ ] Bloqueada [id:: t-ffffff] [area:: carrera] [esfuerzo:: 1h] [est
 DUE_TUE = "- [ ] Entrega [id:: t-gggggg] [area:: universidad] [esfuerzo:: 1h] 📅 2026-11-03"
 
 
-def ctx():  # type: ignore[no-untyped-def]
+def ctx() -> PlanningContext:
     return context(task(A), task(B), task(C), task(D), task(DONE), task(BLOCKED), task(DUE_TUE))
 
 
@@ -136,7 +140,7 @@ def test_past_work_is_rejected() -> None:
 
 def test_block_outside_the_week_is_rejected() -> None:
     assert ConflictCode.FUERA_DE_SEMANA in codes(
-        plan(work(MON.replace(day=9), "08:00–09:00", "t-aaaaaa"))
+        plan(work(MON + timedelta(days=7), "08:00–09:00", "t-aaaaaa"))
     )
 
 
@@ -217,9 +221,10 @@ def test_conflicts_carry_a_readable_reason_and_the_day() -> None:
     assert "Gym" in protected[0].message
 
 
-def test_validation_is_deterministic() -> None:
+def test_validation_does_not_depend_on_block_order() -> None:
     proposal = plan(work(MON, "08:00–09:30", "t-aaaaaa"), work(MON, "09:00–09:20", "t-cccccc"))
-    assert validate_plan(proposal, ctx()) == validate_plan(proposal, ctx())
+    reversed_plan = PlanProposal(week=WEEK, blocks=tuple(reversed(proposal.blocks)))
+    assert Counter(validate_plan(proposal, ctx())) == Counter(validate_plan(reversed_plan, ctx()))
 
 
 def test_work_block_requires_a_task_and_schedule_blocks_must_not_have_one() -> None:
@@ -229,5 +234,66 @@ def test_work_block_requires_a_task_and_schedule_blocks_must_not_have_one() -> N
         Block(BlockKind.FIJO, "x", span(MON, "08:00–09:00"), tid("t-aaaaaa"))
 
 
-def test_context_uses_the_given_now() -> None:
-    assert ctx().not_before == NOW
+def test_zero_or_negative_duration_block_cannot_exist() -> None:
+    with pytest.raises(ValidationError):
+        work(MON, "09:00–09:00", "t-aaaaaa")
+    with pytest.raises(ValidationError):
+        work(MON, "10:00–09:00", "t-aaaaaa")
+
+
+def test_block_given_in_another_zone_is_checked_in_real_time() -> None:
+    gym = span(TUE, "18:00–19:00")
+    in_utc = Interval(gym.start.astimezone(UTC), gym.end.astimezone(UTC))
+    block = Block(BlockKind.TRABAJO, "Trabajo", in_utc, tid("t-aaaaaa"))
+    assert ConflictCode.TIEMPO_PROTEGIDO in codes(plan(block))
+
+
+def test_load_is_checked_against_the_day_budget_not_only_the_focus_limit() -> None:
+    proposal = plan(work(SAT, "09:00–11:00", "t-aaaaaa"), work(SAT, "11:00–12:20", "t-aaaaaa"))
+    assert ConflictCode.EXCESO_DE_CARGA in codes(proposal)
+
+
+def test_exactly_the_day_budget_is_accepted() -> None:
+    proposal = plan(work(MON, "08:00–10:00", "t-aaaaaa"), work(MON, "12:00–14:00", "t-aaaaaa"))
+    assert codes(proposal) == set()
+
+
+def test_work_on_sunday_protected_rest_is_rejected() -> None:
+    sunday = WEEK.days()[-1]
+    assert ConflictCode.TIEMPO_PROTEGIDO in codes(plan(work(sunday, "10:00–11:00", "t-aaaaaa")))
+
+
+def test_work_on_the_due_day_itself_is_accepted() -> None:
+    assert codes(plan(work(TUE, "08:00–09:00", "t-gggggg"))) == set()
+
+
+def test_plan_for_another_week_is_rejected() -> None:
+    other = PlanProposal(week=WEEK.next(), blocks=())
+    assert {c.code for c in validate_plan(other, ctx())} == {ConflictCode.FUERA_DE_SEMANA}
+
+
+def test_effort_is_checked_over_all_blocks_of_the_task() -> None:
+    proposal = plan(
+        work(MON, "08:00–10:00", "t-aaaaaa"),
+        work(TUE, "08:00–10:00", "t-aaaaaa"),
+        work(WED, "08:00–09:00", "t-aaaaaa"),
+    )
+    assert ConflictCode.EXCEDE_ESFUERZO in codes(proposal)
+
+
+def test_superseded_fixed_commitment_is_not_required() -> None:
+    titles = {block.title for block in fixed_and_protected_blocks(ctx())}
+    assert "Tutoría" not in titles  # [estado:: sustituida]
+
+
+def test_past_fixed_commitments_stay_in_the_plan() -> None:
+    # Planificar a mitad de semana no borra los fijos ya pasados: siguen siendo el horario.
+    late = context(task(A), now=at(MON, "12:30"))
+    monday_class = [
+        b
+        for b in fixed_and_protected_blocks(late)
+        if b.kind is BlockKind.FIJO and b.interval.start == at(MON, "10:00")
+    ]
+    assert len(monday_class) == 1
+    proposal = PlanProposal(week=WEEK, blocks=fixed_and_protected_blocks(late))
+    assert validate_plan(proposal, late) == ()

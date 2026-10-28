@@ -4,13 +4,13 @@ import pytest
 
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.ids import TaskId
-from lifeos.domain.task_line import parse_task_line, with_field
+from lifeos.domain.task_line import TaskLine, parse_task_line, with_field
 
 pytestmark = pytest.mark.unit
 BASE = "- [ ] Informe [id:: t-7f3k2m] [area:: universidad] [esfuerzo:: 3h]"
 
 
-def parse(line: str):  # type: ignore[no-untyped-def]
+def parse(line: str) -> TaskLine:
     parsed = parse_task_line(line)
     assert parsed is not None
     return parsed

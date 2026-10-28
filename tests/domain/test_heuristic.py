@@ -3,21 +3,23 @@
 Toda propuesta de la heurística debe pasar el validador: nunca se presenta un plan inválido.
 """
 
-from collections import defaultdict
+from collections import Counter, defaultdict
 from datetime import date
 
 import pytest
 
+from lifeos.domain.heuristic import propose
 from lifeos.domain.plan import (
     Block,
     BlockKind,
     PlanningContext,
     PlanProposal,
+    UnplannedCode,
     fixed_and_protected_blocks,
 )
-from lifeos.domain.heuristic import propose
 from lifeos.domain.plan_validator import validate_plan
-from tests.planning_builders import FRI, MON, SAT, SUN, TUE, WEEK, at, context, task, tid
+from tests.planning_builders import FRI, MON, SAT, SUN, TUE, WED, WEEK, at, context, task, tid
+from tests.planning_samples import horario
 
 pytestmark = pytest.mark.unit
 
@@ -65,7 +67,7 @@ def test_simple_task_is_planned_on_the_first_free_slot() -> None:
 def test_fixed_commitments_and_protected_time_are_kept_unchanged() -> None:
     ctx, proposal = run(line("t-aaaaaa", "12h"))
     schedule_blocks = [b for b in proposal.blocks if b.kind is not BlockKind.TRABAJO]
-    assert schedule_blocks == list(fixed_and_protected_blocks(ctx))
+    assert Counter(schedule_blocks) == Counter(fixed_and_protected_blocks(ctx))
 
 
 def test_long_divisible_task_is_split_between_minimum_and_maximum() -> None:
@@ -90,7 +92,7 @@ def test_indivisible_task_longer_than_the_maximum_block_is_reported() -> None:
     _, proposal = run(line("t-aaaaaa", "3h", extra="[divisible:: no]"))
     assert work_of(proposal, "t-aaaaaa") == []
     assert proposal.unplanned[0].task_id == tid("t-aaaaaa")
-    assert "no divisible" in proposal.unplanned[0].reason
+    assert proposal.unplanned[0].code is UnplannedCode.NO_DIVISIBLE
 
 
 def test_urgent_task_goes_first_and_avoids_its_due_day() -> None:
@@ -113,7 +115,7 @@ def test_higher_priority_goes_first_with_the_same_due_date() -> None:
         line("t-bbbbbb", "1h", extra="[prioridad:: baja] 📅 2026-11-06"),
         line("t-aaaaaa", "1h", extra="[prioridad:: alta] 📅 2026-11-06"),
     )
-    first = min(proposal.blocks, key=lambda b: b.interval.start if b.task_id else at(SUN, "23:00"))
+    first = min(proposal.work_blocks(), key=lambda b: b.interval.start)
     assert first.task_id == tid("t-aaaaaa")
 
 
@@ -134,8 +136,10 @@ def test_insufficient_capacity_reports_unplanned_and_keeps_rest() -> None:
 
 def test_task_that_cannot_fit_before_its_due_date_suggests_renegotiating() -> None:
     _, proposal = run(line("t-aaaaaa", "10h", extra="📅 2026-11-03"))
+    # Lunes y, como no queda otra, el propio día de entrega: 240 + 240 min.
+    assert minutes(work_of(proposal, "t-aaaaaa")) == 480
     (pending,) = proposal.unplanned
-    assert pending.minutes > 0
+    assert (pending.code, pending.minutes) == (UnplannedCode.NO_CABE_ENTERA, 120)
     assert "fecha límite" in pending.suggestion
 
 
@@ -162,10 +166,11 @@ def test_dependent_of_a_blocked_or_unknown_task_is_not_planned() -> None:
         line("t-bbbbbb", "1h", extra="[depende:: t-aaaaaa]"),
         line("t-cccccc", "1h", extra="[depende:: t-zzzzzz]"),
     )
-    reasons = {p.task_id: p.reason for p in proposal.unplanned}
-    assert "dependencia" in reasons[tid("t-bbbbbb")]
-    assert "dependencia" in reasons[tid("t-cccccc")]
-    assert tid("t-aaaaaa") not in reasons  # bloqueada: no se planifica ni se reporta
+    codes = {p.task_id: p.code for p in proposal.unplanned}
+    assert codes == {
+        tid("t-bbbbbb"): UnplannedCode.DEPENDENCIA,
+        tid("t-cccccc"): UnplannedCode.DEPENDENCIA,
+    }  # la bloqueada no se planifica ni se reporta
 
 
 def test_circular_dependencies_are_reported() -> None:
@@ -174,7 +179,18 @@ def test_circular_dependencies_are_reported() -> None:
         line("t-bbbbbb", "1h", extra="[depende:: t-aaaaaa]"),
     )
     assert {p.task_id for p in proposal.unplanned} == {tid("t-aaaaaa"), tid("t-bbbbbb")}
-    assert all("circular" in p.reason for p in proposal.unplanned)
+    assert all(p.code is UnplannedCode.DEPENDENCIA_CIRCULAR for p in proposal.unplanned)
+
+
+def test_three_task_cycle_is_reported_and_the_rest_is_planned() -> None:
+    _, proposal = run(
+        line("t-aaaaaa", "1h", extra="[depende:: t-cccccc]"),
+        line("t-bbbbbb", "1h", extra="[depende:: t-aaaaaa]"),
+        line("t-cccccc", "1h", extra="[depende:: t-bbbbbb]"),
+        line("t-dddddd", "1h"),
+    )
+    assert len(proposal.unplanned) == 3
+    assert minutes(work_of(proposal, "t-dddddd")) == 60
 
 
 def test_completed_dependency_is_satisfied() -> None:
@@ -189,10 +205,12 @@ def test_tasks_missing_critical_information_are_reported_as_uncertain() -> None:
         "- [ ] Sin esfuerzo [id:: t-aaaaaa] [area:: universidad]",
         "- [ ] Sin id [area:: universidad] [esfuerzo:: 1h]",
     )
-    reasons = sorted(p.reason for p in proposal.unplanned)
-    assert any("esfuerzo" in reason for reason in reasons)
-    assert any("id" in reason for reason in reasons)
-    assert all(b.kind is not BlockKind.TRABAJO for b in proposal.blocks)
+    assert sorted(p.code for p in proposal.unplanned) == sorted(
+        [UnplannedCode.FALTA_INFORMACION, UnplannedCode.SIN_ID]
+    )
+    missing = next(p for p in proposal.unplanned if p.code is UnplannedCode.FALTA_INFORMACION)
+    assert "esfuerzo" in missing.reason
+    assert proposal.work_blocks() == ()
 
 
 def test_closed_tasks_are_ignored() -> None:
@@ -210,12 +228,19 @@ def test_planning_from_the_middle_of_the_week_skips_the_past() -> None:
     _, proposal = run(line("t-aaaaaa", "1h"), now=at(TUE, "17:30"))
     (block,) = work_of(proposal, "t-aaaaaa")
     # Al martes le quedan 60 min libres, justo el mínimo libre: presupuesto 0 → miércoles.
-    assert block.interval.start == at(TUE.replace(day=4), "08:00")
+    assert block.interval.start == at(WED, "08:00")
 
 
 def test_heuristic_is_deterministic() -> None:
-    lines = (line("t-aaaaaa", "5h"), line("t-bbbbbb", "2h", extra="📅 2026-11-05"))
-    assert run(*lines)[1] == run(*lines)[1]
+    lines = [
+        line("t-aaaaaa", "5h"),
+        line("t-bbbbbb", "2h", extra="📅 2026-11-05"),
+        line("t-cccccc", "1h", extra="[depende:: t-aaaaaa]"),
+        line("t-dddddd", "90m", extra="[prioridad:: alta]"),
+    ]
+    expected = run(*lines)[1]
+    shuffled = [lines[2], lines[0], lines[3], lines[1]]  # el orden de lectura no cambia el plan
+    assert run(*shuffled)[1] == expected
 
 
 def test_justification_summarises_the_result() -> None:
@@ -239,3 +264,28 @@ def _assert_free_time_minimum_respected(ctx: PlanningContext, proposal: PlanProp
         assert worked[day.day] <= day.budget_minutes
         if day.free_minutes:
             assert day.free_minutes - worked[day.day] >= ctx.limits.free_min
+
+
+def test_no_tasks_gives_only_the_schedule_blocks() -> None:
+    ctx, proposal = run()
+    assert proposal.unplanned == ()
+    assert Counter(proposal.blocks) == Counter(fixed_and_protected_blocks(ctx))
+
+
+def test_indivisible_task_without_a_long_enough_gap_is_reported() -> None:
+    _, proposal = run(
+        line("t-aaaaaa", "90m", extra="[divisible:: no]"),
+        horario=horario(
+            limites="[foco_max_dia:: 8h] [libre_min_dia:: 0m] [margen:: 0%]",
+            disponibilidad="- lun 08:00–09:00\n- lun 09:30–10:30",
+        ),
+    )
+    (pending,) = proposal.unplanned
+    assert pending.code is UnplannedCode.SIN_CAPACIDAD
+
+
+def test_new_unavailability_recalculates_capacity() -> None:
+    # Cambio de contexto (enfermedad): un "No disponible" fechado deja el lunes sin capacidad.
+    sick = horario(no_disponible="- 2026-11-02 todo el día · Enfermedad")
+    _, proposal = run(line("t-aaaaaa", "1h"), horario=sick)
+    assert [day_of(b) for b in work_of(proposal, "t-aaaaaa")] == [TUE]
