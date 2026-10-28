@@ -79,3 +79,32 @@ def test_policy_protected_roots_reach_the_runtime(project: Path) -> None:
     )
     runtime = build_runtime(Settings.from_env(project, {}))
     assert VaultPath("Privado") in runtime.protected
+
+
+# --- Fase 3: Jefe, zona horaria y redactor con IA ----------------------------------------------
+
+
+def test_runtime_wires_the_jefe_only_with_a_vault(project: Path, tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    with_vault = build_runtime(Settings.from_env(project, {"LIFEOS_VAULT_PATH": str(vault)}))
+    assert with_vault.jefe is not None
+    assert build_runtime(Settings.from_env(project, {})).jefe is None
+
+
+def test_configured_timezone_must_be_a_known_zone(project: Path) -> None:
+    settings = Settings.from_env(project, {"LIFEOS_TIMEZONE": "Marte/Olympus"})
+    with pytest.raises(ConfigRejectedError, match="LIFEOS_TIMEZONE"):
+        build_runtime(settings)
+    assert (
+        Settings.from_env(project, {"LIFEOS_TIMEZONE": "America/Lima"}).timezone == "America/Lima"
+    )
+
+
+def test_llm_runtime_gives_the_jefe_an_ai_drafter(project: Path, tmp_path: Path) -> None:
+    vault = tmp_path / "vault"
+    vault.mkdir()
+    settings = Settings.from_env(project, {"LIFEOS_VAULT_PATH": str(vault), "NVIDIA_API_KEY": KEY})
+    runtime = build_runtime(settings, with_llm=True)
+    assert runtime.jefe is not None
+    assert runtime.jefe.has_drafter
