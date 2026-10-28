@@ -86,6 +86,11 @@ class JefePlanner:
         self._configured_zone = configured_zone
 
     @property
+    def has_drafter(self) -> bool:
+        """Hay redactor con IA (pasarela y clave configuradas)."""
+        return self._drafter is not None
+
+    @property
     def actor(self) -> ActorContext:
         """Contexto del Jefe con un identificador de correlación nuevo por operación."""
         return ActorContext(agent_id=JEFE_ID, correlation_id=uuid.uuid4().hex)

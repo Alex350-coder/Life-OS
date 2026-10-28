@@ -13,14 +13,17 @@ from datetime import UTC
 from pathlib import Path
 from types import MappingProxyType
 from typing import Self
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.adapters.jsonl_logs import JsonlAuditLog, JsonlUsageLog
 from lifeos.adapters.nvidia_llm import NvidiaChatClient
 from lifeos.adapters.schemas import SCHEMAS
-from lifeos.adapters.secrets import Secret, read_dotenv, resolve_secret
+from lifeos.adapters.secrets import MissingSecretError, Secret, read_dotenv, resolve_secret
 from lifeos.adapters.system_clock import SystemClock
 from lifeos.adapters.yaml_config import YamlConfigSource
+from lifeos.application.jefe import JefePlanner
+from lifeos.application.jefe_ai import AiPlanDrafter
 from lifeos.application.llm_calls import ModelGateway
 from lifeos.application.permissions import (
     TOOL_WRITE_MODES,
@@ -30,12 +33,15 @@ from lifeos.application.permissions import (
 )
 from lifeos.application.tools import ToolRegistry
 from lifeos.ports.clock import Clock
-from lifeos.ports.config import ConfigRejectedError, ModelCatalog, Policy
+from lifeos.ports.config import ConfigError, ConfigRejectedError, ModelCatalog, Policy
 from lifeos.ports.llm import LlmClient
 from lifeos.ports.logs import AuditLog, UsageLog
-from lifeos.ports.vault import VaultPath
+from lifeos.ports.vault import VaultPath, VaultStore
 
 ENV_FILE = ".env"
+# Errores de arranque (configuración o secretos ausentes) que la presentación trata como error
+# de configuración sin conocer los adaptadores.
+STARTUP_ERRORS: tuple[type[Exception], ...] = (ConfigError, MissingSecretError)
 CONFIG_DIR = "config"
 DEFAULT_LOGS_DIR = "logs"
 
@@ -46,6 +52,7 @@ class Settings:
     config_dir: Path
     logs_dir: Path
     vault_path: Path | None
+    timezone: str | None  # LIFEOS_TIMEZONE: debe coincidir con la zona de horario.md
     # Entorno del proceso con `.env` como respaldo. Contiene secretos: nunca aparece en `repr`.
     environ: Mapping[str, str] = field(repr=False)
 
@@ -60,6 +67,7 @@ class Settings:
             config_dir=project_root / CONFIG_DIR,
             logs_dir=Path(logs),
             vault_path=Path(vault) if vault else None,
+            timezone=merged.get("LIFEOS_TIMEZONE") or None,
             environ=MappingProxyType(merged),
         )
 
@@ -75,6 +83,10 @@ class Runtime:
     clock: Clock
     gateway: ModelGateway | None
     tools: ToolRegistry | None
+    # Bóveda sin envolver para las órdenes del propietario (capturar, tareas); los agentes
+    # solo acceden mediante `tools`.
+    vault: VaultStore | None
+    jefe: JefePlanner | None
 
 
 def _provider_secrets(settings: Settings, catalog: ModelCatalog) -> dict[str, Secret]:
@@ -94,7 +106,38 @@ def _clients(catalog: ModelCatalog, secrets: Mapping[str, Secret]) -> dict[str, 
     return {"nvidia": NvidiaChatClient(nvidia.base_url, secrets["nvidia"])}
 
 
-def build_runtime(settings: Settings, *, with_llm: bool = False) -> Runtime:
+def _check_timezone(settings: Settings) -> None:
+    if settings.timezone is None:
+        return
+    try:
+        ZoneInfo(settings.timezone)
+    except (ZoneInfoNotFoundError, ValueError):
+        raise ConfigRejectedError(
+            "LIFEOS_TIMEZONE", (f"zona IANA desconocida: {settings.timezone}",)
+        ) from None
+
+
+def _jefe(
+    tools: ToolRegistry | None,
+    gateway: ModelGateway | None,
+    permissions: Mapping[str, EffectivePermissions],
+    clock: Clock,
+    settings: Settings,
+) -> JefePlanner | None:
+    if tools is None or "jefe" not in permissions:
+        return None
+    drafter = (
+        AiPlanDrafter(gateway, SCHEMAS["plan_v1"], profile=permissions["jefe"].profile)
+        if gateway is not None
+        else None
+    )
+    return JefePlanner(tools, clock, drafter=drafter, configured_zone=settings.timezone)
+
+
+def build_runtime(
+    settings: Settings, *, with_llm: bool = False, clock: Clock | None = None
+) -> Runtime:
+    _check_timezone(settings)
     source = YamlConfigSource(settings.config_dir)
     policy = source.load_policy()
     catalog = source.load_catalog()
@@ -109,16 +152,13 @@ def build_runtime(settings: Settings, *, with_llm: bool = False) -> Runtime:
     known = tuple(secret.reveal() for secret in secrets.values())
     usage_log = JsonlUsageLog(settings.logs_dir, secrets=known)
     audit_log = JsonlAuditLog(settings.logs_dir, secrets=known)
-    # La Fase 2 registra todo en UTC; la zona local (LIFEOS_TIMEZONE) llega con los rituales.
-    clock = SystemClock(UTC)
+    # Los logs siguen en UTC (ADR-0008); el plan usa la zona de horario.md.
+    clock = clock or SystemClock(UTC)
     gateway = (
         ModelGateway(_clients(catalog, secrets), catalog, clock, usage_log) if with_llm else None
     )
-    tools = (
-        ToolRegistry(FilesystemVault(settings.vault_path), permissions, audit_log, clock)
-        if settings.vault_path is not None
-        else None
-    )
+    vault = FilesystemVault(settings.vault_path) if settings.vault_path is not None else None
+    tools = ToolRegistry(vault, permissions, audit_log, clock) if vault is not None else None
     return Runtime(
         policy=policy,
         catalog=catalog,
@@ -129,4 +169,6 @@ def build_runtime(settings: Settings, *, with_llm: bool = False) -> Runtime:
         clock=clock,
         gateway=gateway,
         tools=tools,
+        vault=vault,
+        jefe=_jefe(tools, gateway, permissions, clock, settings),
     )
