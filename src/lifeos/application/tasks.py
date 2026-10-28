@@ -31,6 +31,7 @@ from lifeos.ports.vault import (
     VaultPath,
     VaultStore,
     VersionConflictError,
+    within_any,
 )
 
 ARCHIVE_ROOT = VaultPath("Archivo")
@@ -38,7 +39,10 @@ INBOX_ROOT = VaultPath("00-Inbox")
 # Carpetas que no se leen como tareas: perfil del propietario, auditoría y capturas sin
 # procesar (el texto capturado es un dato y no debe ocupar ni duplicar ids de tareas).
 SKIPPED_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"), INBOX_ROOT)
-PROTECTED_ROOTS = (ARCHIVE_ROOT, *SKIPPED_ROOTS)
+# Mínimo de RULES E.12: ningún agente escribe aquí. La política puede ampliarlo, no reducirlo.
+RULES_FORBIDDEN_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"), ARCHIVE_ROOT)
+# Carpetas que los casos de uso de tareas nunca escriben si no se indica otra lista.
+DEFAULT_PROTECTED_ROOTS = (*RULES_FORBIDDEN_ROOTS, INBOX_ROOT)
 NOTE_SUFFIX = ".md"
 # Ids presentes en líneas mal formadas: siguen ocupados aunque la línea no se pueda analizar.
 _RAW_ID_RE = re.compile(r"\[id::\s*(t-[0-9a-z]{6})\s*\]")
@@ -99,18 +103,8 @@ class TaskQuery:
             raise ValidationError("fecha", self.due_from, "el inicio es posterior al final")
 
 
-def _within(path: VaultPath, roots: tuple[VaultPath, ...]) -> bool:
-    # Windows y macOS no distinguen mayúsculas: "_SISTEMA" es la misma carpeta que "_sistema".
-    parts = tuple(part.casefold() for part in path.parts)
-    return any(parts[: len(root.parts)] == _folded(root) for root in roots)
-
-
-def _folded(root: VaultPath) -> tuple[str, ...]:
-    return tuple(part.casefold() for part in root.parts)
-
-
 def is_archived(path: VaultPath) -> bool:
-    return _within(path, (ARCHIVE_ROOT,))
+    return within_any(path, (ARCHIVE_ROOT,))
 
 
 # --- Lectura ----------------------------------------------------------------------------------
@@ -136,7 +130,7 @@ def scan(vault: VaultStore) -> ScanReport:
     problems: list[NoteProblem] = []
     reserved: set[TaskId] = set()
     for path in vault.list_notes():
-        if _within(path, SKIPPED_ROOTS):
+        if within_any(path, SKIPPED_ROOTS):
             continue
         note_tasks, note_problems, note_reserved = _scan_note(vault, path)
         tasks.extend(note_tasks)
@@ -183,9 +177,15 @@ def find_task(vault: VaultStore, task_id: TaskId) -> LocatedTask:
 # --- Escritura --------------------------------------------------------------------------------
 
 
-def check_writable(path: VaultPath) -> None:
-    """Rechaza carpetas protegidas (sin distinguir mayúsculas) y archivos que no son notas."""
-    if _within(path, PROTECTED_ROOTS):
+def check_writable(
+    path: VaultPath, protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS
+) -> None:
+    """Rechaza carpetas protegidas (sin distinguir mayúsculas) y archivos que no son notas.
+
+    `protected` lo calcula la raíz de composición con `permissions.protected_roots(policy)`;
+    el mínimo de las reglas se aplica siempre, aunque se pase una lista vacía.
+    """
+    if within_any(path, (*DEFAULT_PROTECTED_ROOTS, *protected)):
         raise ApplicationError(f"{path} está en una carpeta protegida")
     if not path.name.lower().endswith(NOTE_SUFFIX):
         raise ApplicationError(f"{path} no es una nota Markdown")
@@ -265,9 +265,10 @@ def create_task(
     due: date | None = None,
     scheduled: date | None = None,
     priority: Priority = Priority.MEDIA,
+    protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS,
 ) -> LocatedTask:
     """Crea una tarea con id único al final de la nota indicada."""
-    check_writable(path)
+    check_writable(path, protected)
     task_id = new_unique_task_id(_taken_ids(vault))
     line = _render_new_task(
         title, task_id, area, effort, due=due, scheduled=scheduled, priority=priority
@@ -306,9 +307,15 @@ def update_task(
     return _rewrite_line(vault, located.path, located.index, transform)
 
 
-def ensure_id(vault: VaultStore, path: VaultPath, index: int) -> LocatedTask:
+def ensure_id(
+    vault: VaultStore,
+    path: VaultPath,
+    index: int,
+    *,
+    protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS,
+) -> LocatedTask:
     """Asigna un id estable a la tarea de esa línea si no lo tiene; si ya lo tiene, no escribe."""
-    check_writable(path)
+    check_writable(path, protected)
     lines = {item.index: item.line for item in parse_note(vault.read(path).text).tasks}
     if index not in lines:
         raise TaskNotFoundError(f"la línea {index + 1} de {path} no es una tarea")

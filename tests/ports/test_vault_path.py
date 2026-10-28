@@ -1,8 +1,10 @@
 """SEC-02 (validación léxica): rutas relativas, normalizadas y sin escapes."""
 
+import unicodedata
+
 import pytest
 
-from lifeos.ports.vault import PathRejectedError, VaultPath
+from lifeos.ports.vault import PathRejectedError, VaultPath, within_any
 
 pytestmark = [pytest.mark.unit, pytest.mark.security]
 
@@ -70,3 +72,27 @@ def test_relative_to_strips_prefix() -> None:
     assert path.relative_to(VaultPath.parse("Archivo")) == VaultPath.parse("01-Universidad/a.md")
     with pytest.raises(PathRejectedError):
         path.relative_to(VaultPath.parse("Semanal"))
+
+
+# --- within_any (Fase 2): comparación de raíces sin distinguir mayúsculas ni forma Unicode ---
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("_sistema/perfil.md", True),
+        ("_SISTEMA/perfil.md", True),
+        ("_sistema", True),
+        ("_sistemas/x.md", False),
+        ("Diario/_sistema/x.md", False),
+        ("Archivo/a/b.md", True),
+    ],
+)
+def test_within_any_compares_whole_components_case_insensitively(raw: str, expected: bool) -> None:
+    roots = (VaultPath("_sistema"), VaultPath("Archivo"))
+    assert within_any(VaultPath(raw), roots) is expected
+
+
+def test_within_any_treats_nfc_and_nfd_names_as_the_same_folder() -> None:
+    nfd = unicodedata.normalize("NFD", "Ñotas/x.md")
+    assert within_any(VaultPath(nfd), (VaultPath("ñotas"),))

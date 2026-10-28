@@ -4,7 +4,14 @@ import pytest
 
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.ids import TaskId
-from lifeos.domain.note import append_line, parse_note, remove_line, replace_line
+from lifeos.domain.note import (
+    BOM,
+    append_line,
+    insert_line,
+    parse_note,
+    remove_line,
+    replace_line,
+)
 
 pytestmark = pytest.mark.unit
 
@@ -88,3 +95,28 @@ def test_line_operations_reject_embedded_newlines() -> None:
         append_line("a\n", "x\ny")
     with pytest.raises(ValidationError, match="línea"):
         replace_line("a\n", 0, "x\ry")
+
+
+# --- insert_line (Fase 2): anexar dentro de una sección sin tocar el resto ---------------
+
+
+@pytest.mark.parametrize(
+    ("text", "index", "expected"),
+    [
+        ("a\nc\n", 1, "a\nb\nc\n"),
+        ("a\r\nc\r\n", 1, "a\r\nb\r\nc\r\n"),
+        ("a\nc\n", 2, "a\nc\nb\n"),
+        ("a\nc", 2, "a\nc\nb\n"),
+        ("", 0, "b\n"),
+        (BOM + "a\n", 0, BOM + "b\na\n"),
+    ],
+)
+def test_insert_line_keeps_newlines_and_bom(text: str, index: int, expected: str) -> None:
+    assert insert_line(text, index, "b") == expected
+
+
+def test_insert_line_rejects_bad_index_and_embedded_newlines() -> None:
+    with pytest.raises(ValidationError):
+        insert_line("a\n", 5, "b")
+    with pytest.raises(ValidationError):
+        insert_line("a\n", 0, "b\nc")

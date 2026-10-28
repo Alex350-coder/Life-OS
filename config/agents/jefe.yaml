@@ -1,0 +1,28 @@
+# Agente Jefe (ADR-0002, ADR-0004). Este archivo SOLICITA; la política decide.
+# El permiso de publicar el plan (modo plan) lo concede la política, no este archivo (Fase 3).
+schema_version: 1
+id: jefe
+nombre: Jefe
+version: 1
+proposito: "Consolidar tareas y compromisos y proponer un plan viable para aprobación."
+modelo_solicitado:
+  perfil: grande
+contrato:                      # provisional hasta el contrato del planificador (Fase 3)
+  entrada: captura_v1
+  salida: captura_v1
+herramientas: [leer_nota, listar_tareas, crear_captura]
+permisos_solicitados:
+  lectura:
+    - _sistema/
+    - 00-Inbox/
+    - 01-Universidad/
+    - 02-Proyectos/
+    - 03-Carrera/
+    - 04-Hobbies/
+    - 07-Cotidiano/
+    - Semanal/
+    - Diario/
+  escritura:
+    - ruta: 00-Inbox/
+      modo: crear
+metricas: []

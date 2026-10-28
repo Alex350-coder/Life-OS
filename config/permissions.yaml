@@ -1,0 +1,53 @@
+# Política de permisos del PROPIETARIO (ADR-0004). Los agentes no pueden editarla.
+# - Rutas relativas a la raíz de la bóveda, terminadas en "/". Sin "..", absolutas ni enlaces.
+# - Permisos efectivos = permisos solicitados por el agente ∩ esta política. Si un agente pide
+#   algo que no está aquí, se rechaza la configuración completa.
+# - Solo dato: el cargador rechaza etiquetas YAML, anclas, alias, claves duplicadas y claves
+#   desconocidas (SEC-06).
+schema_version: 1
+
+global:
+  # Mínimo obligatorio de RULES E.12; se puede ampliar, nunca reducir.
+  escritura_prohibida_para_agentes:
+    - _sistema/        # perfil y reglas: solo el propietario
+    - _logs/           # reservada; la auditoría de la Fase 2 vive en project/logs (ADR-0008)
+    - Archivo/         # el archivado lo ejecuta un caso de uso controlado, no un agente
+  # Sin lectura de agentes hasta que una fase lo autorice (privacidad).
+  lectura_restringida:
+    - 05-Salud/
+    - 06-Finanzas/
+  # Único agente que puede publicar el plan global (ADR-0002).
+  dueno_plan_global: jefe
+
+agentes:
+  jefe:
+    herramientas: [leer_nota, listar_tareas, crear_captura]
+    lectura:
+      - _sistema/
+      - 00-Inbox/
+      - 01-Universidad/
+      - 02-Proyectos/
+      - 03-Carrera/
+      - 04-Hobbies/
+      - 07-Cotidiano/
+      - Semanal/
+      - Diario/
+    escritura:
+      - ruta: Semanal/
+        modo: plan          # solo mediante la publicación de un plan validado (Fase 3)
+      - ruta: Diario/
+        modo: plan
+      - ruta: 00-Inbox/
+        modo: crear         # crea capturas; no edita las existentes
+  coach:
+    herramientas: [leer_nota, listar_tareas, crear_captura, anexar_checkin]
+    lectura:
+      - _sistema/
+      - Semanal/
+      - Diario/
+    escritura:
+      - ruta: 00-Inbox/
+        modo: crear
+      - ruta: Diario/
+        modo: anexar_seccion
+        seccion: check-ins  # solo añade líneas en "## Check-ins"; no edita el plan del día
