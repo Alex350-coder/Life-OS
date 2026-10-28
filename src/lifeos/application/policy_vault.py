@@ -29,8 +29,8 @@ from lifeos.ports.vault import (
 WEEKLY_ROOT = VaultPath("Semanal")
 DAILY_ROOT = VaultPath("Diario")
 PLAN_NOTE_NAMES = (
-    (WEEKLY_ROOT, re.compile(r"\d{4}-W\d{2}\.md")),
-    (DAILY_ROOT, re.compile(r"\d{4}-\d{2}-\d{2}\.md")),
+    (WEEKLY_ROOT, re.compile(r"[0-9]{4}-W[0-9]{2}\.md")),
+    (DAILY_ROOT, re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\.md")),
 )
 # Secciones de la nota diaria que el plan nunca reescribe (Coach y propietario).
 PROTECTED_DAILY_SECTIONS = ("check-ins", "cierre")

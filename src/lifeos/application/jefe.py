@@ -6,8 +6,10 @@
 4. Valida (código, obligatorio): lo hace la herramienta `publicar_plan` antes de escribir.
 5. Si no es viable devuelve los conflictos y no guarda nada.
 6. Un plan válido queda `propuesto` hasta que el propietario lo aprueba (MVP).
-7. Al aprobar se vuelve a leer y a validar contra el estado actual y se publica.
-8. Cada publicación o rechazo queda en la auditoría.
+7. Al aprobar se vuelve a leer la nota, se valida contra la bóveda y la hora actuales y se
+   publica el render canónico del plan (ADR-0009).
+8. Cada publicación o rechazo queda en la auditoría, con el mismo identificador de correlación
+   que el registro de uso del modelo.
 """
 
 import uuid
@@ -15,10 +17,10 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
-from lifeos.application.plan_publication import NoteWrite, PlanPublication, PlanRejectedError
+from lifeos.application.plan_publication import PlanPublication, PlanRejectedError
 from lifeos.application.tasks import ApplicationError, TaskQuery
 from lifeos.application.tools import ActorContext, ToolRegistry
-from lifeos.domain.heuristic import propose
+from lifeos.domain.heuristic import propose, unplanned_after
 from lifeos.domain.horario_note import HORARIO_NOTE, parse_horario
 from lifeos.domain.plan import (
     Conflict,
@@ -28,15 +30,7 @@ from lifeos.domain.plan import (
     PlanStatus,
     build_context,
 )
-from lifeos.domain.plan_note import (
-    PlanNoteError,
-    approve_weekly,
-    daily_path,
-    parse_weekly,
-    render_daily,
-    render_weekly,
-    weekly_path,
-)
+from lifeos.domain.plan_note import PlanNoteError, WeeklyNote, parse_weekly, weekly_path
 from lifeos.domain.schedule import Schedule
 from lifeos.domain.weeks import IsoWeek
 from lifeos.ports.clock import Clock
@@ -56,14 +50,14 @@ class PlanAlreadyApprovedError(ApplicationError):
 class PlanDrafter(Protocol):
     """Genera una propuesta (p. ej., con IA). Siempre pasa después por el validador."""
 
-    def draft(self, context: PlanningContext) -> PlanProposal: ...
+    def draft(self, context: PlanningContext, *, correlation_id: str) -> PlanProposal: ...
 
 
 @dataclass(frozen=True, slots=True)
 class PlanOutcome:
     proposal: PlanProposal
     conflicts: tuple[Conflict, ...]
-    path: VaultPath | None
+    path: VaultPath | None  # None si se rechazó: no se guardó nada
     status: PlanStatus | None
 
     @property
@@ -90,9 +84,8 @@ class JefePlanner:
         """Hay redactor con IA (pasarela y clave configuradas)."""
         return self._drafter is not None
 
-    @property
-    def actor(self) -> ActorContext:
-        """Contexto del Jefe con un identificador de correlación nuevo por operación."""
+    def new_actor(self) -> ActorContext:
+        """Contexto del Jefe con un identificador de correlación nuevo para una operación."""
         return ActorContext(agent_id=JEFE_ID, correlation_id=uuid.uuid4().hex)
 
     # --- Lectura del contexto ---------------------------------------------------------------
@@ -121,7 +114,7 @@ class JefePlanner:
 
     def context(self, week: IsoWeek, *, now: datetime | None = None) -> PlanningContext:
         """Contexto de planificación tal como lo vería ahora el Jefe."""
-        actor = self.actor
+        actor = self.new_actor()
         return self._context(actor, self._schedule(actor), week, now or self._clock.now())
 
     def _week(self, week: IsoWeek | None, schedule: Schedule) -> IsoWeek:
@@ -137,93 +130,82 @@ class JefePlanner:
 
     # --- Propuesta ------------------------------------------------------------------------
 
-    def _draft(self, context: PlanningContext, origin: PlanOrigin) -> PlanProposal:
+    def _draft(
+        self, context: PlanningContext, origin: PlanOrigin, actor: ActorContext
+    ) -> PlanProposal:
         if origin is PlanOrigin.HEURISTICA:
             return propose(context)
         if self._drafter is None:
             raise ApplicationError("la propuesta con IA no está configurada (falta la pasarela)")
-        return self._drafter.draft(context)
+        return self._drafter.draft(context, correlation_id=actor.correlation_id)
 
     def proponer(
         self, week: IsoWeek | None = None, *, origin: PlanOrigin = PlanOrigin.HEURISTICA
     ) -> PlanOutcome:
-        actor = self.actor
+        actor = self.new_actor()
         schedule = self._schedule(actor)
         target = self._week(week, schedule)
-        path = weekly_path(target)
-        existing = self._snapshot(actor, path)
-        if existing is not None and _status_of(existing) is PlanStatus.APROBADO:
+        existing = self._snapshot(actor, weekly_path(target))
+        if existing is not None and _note(existing).status is PlanStatus.APROBADO:
             raise PlanAlreadyApprovedError(f"el plan de {target} ya está aprobado")
         now = self._clock.now()
         context = self._context(actor, schedule, target, now)
-        proposal = self._draft(context, origin)
-        text = render_weekly(proposal, context, status=PlanStatus.PROPUESTO, generated=now)
-        weekly = (VaultPath.parse(path), text, existing.version if existing else None)
-        return self._publish(
-            actor, PlanPublication(proposal, context, weekly), PlanStatus.PROPUESTO
+        publication = PlanPublication(
+            proposal=self._draft(context, origin, actor),
+            context=context,
+            status=PlanStatus.PROPUESTO,
+            generated=now,
+            weekly_expected=existing.version if existing else None,
         )
+        return self._publish(actor, publication)
 
     # --- Aprobación -----------------------------------------------------------------------
 
     def aprobar(self, week: IsoWeek | None = None) -> PlanOutcome:
-        actor = self.actor
+        actor = self.new_actor()
         schedule = self._schedule(actor)
         target = self._week(week, schedule)
-        path = weekly_path(target)
-        snapshot = self._snapshot(actor, path)
+        snapshot = self._snapshot(actor, weekly_path(target))
         if snapshot is None:
             raise PlanNotFoundError(f"no hay plan propuesto para {target}: usa primero 'semana'")
-        try:
-            note = parse_weekly(snapshot.text)
-        except PlanNoteError as error:
-            raise ApplicationError(f"{path} no es un plan válido: {error}") from error
+        note = _note(snapshot)
         if note.status is PlanStatus.APROBADO:
             raise PlanAlreadyApprovedError(f"el plan de {target} ya está aprobado")
-        # Se valida contra el estado actual de la bóveda, desde el momento de la propuesta.
-        context = self._context(actor, schedule, target, note.generated)
-        proposal = PlanProposal(week=target, blocks=note.blocks, origin=note.origin)
-        weekly = (
-            VaultPath.parse(path),
-            approve_weekly(snapshot.text, approved_at=self._clock.now()),
-            snapshot.version,
+        now = self._clock.now()
+        # Revalidación con la bóveda y la hora actuales: un plan con bloques ya pasados (o con
+        # una fecha de generación editada) no se aprueba; hay que volver a proponerlo.
+        context = self._context(actor, schedule, target, now)
+        unplanned, alerts = unplanned_after(context, note.blocks)
+        proposal = PlanProposal(
+            week=target,
+            blocks=note.blocks,
+            unplanned=unplanned,
+            justification=note.justification,
+            origin=note.origin,
+            alerts=alerts,
         )
-        daily = self._daily_notes(actor, proposal, context)
-        return self._publish(
-            actor, PlanPublication(proposal, context, weekly, daily), PlanStatus.APROBADO
+        publication = PlanPublication(
+            proposal=proposal,
+            context=context,
+            status=PlanStatus.APROBADO,
+            generated=note.generated,
+            weekly_expected=snapshot.version,
+            approved_at=now,
         )
+        return self._publish(actor, publication)
 
-    def _daily_notes(
-        self, actor: ActorContext, proposal: PlanProposal, context: PlanningContext
-    ) -> tuple[NoteWrite, ...]:
-        days = sorted({context.local_day(block.interval.start) for block in proposal.blocks})
-        writes = []
-        for day in days:
-            path = daily_path(day)
-            existing = self._snapshot(actor, path)
-            text = render_daily(
-                day,
-                proposal.blocks,
-                zone=context.zone,
-                week=proposal.week,
-                existing=existing.text if existing else None,
-            )
-            writes.append((VaultPath.parse(path), text, existing.version if existing else None))
-        return tuple(writes)
-
-    def _publish(
-        self, actor: ActorContext, publication: PlanPublication, status: PlanStatus
-    ) -> PlanOutcome:
+    def _publish(self, actor: ActorContext, publication: PlanPublication) -> PlanOutcome:
         try:
-            self._tools.publicar_plan(actor, publication)
+            paths = self._tools.publicar_plan(actor, publication)
         except PlanRejectedError as rejected:
             return PlanOutcome(publication.proposal, rejected.conflicts, None, None)
-        return PlanOutcome(publication.proposal, (), publication.weekly[0], status)
+        return PlanOutcome(publication.proposal, (), paths[-1], publication.status)
 
 
-def _status_of(snapshot: Snapshot) -> PlanStatus:
+def _note(snapshot: Snapshot) -> WeeklyNote:
     try:
-        return parse_weekly(snapshot.text).status
+        return parse_weekly(snapshot.text)
     except PlanNoteError as error:
         raise ApplicationError(
-            f"la nota semanal existente no es válida; corrígela o archívala: {error}"
+            f"la nota semanal no es un plan válido; corrígela o archívala: {error}"
         ) from error

@@ -6,7 +6,7 @@ validador exige que el plan los contenga exactamente.
 
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
@@ -20,6 +20,17 @@ from lifeos.domain.weeks import IsoWeek
 
 # Estados con trabajo pendiente que el Jefe puede programar (RULES §D3).
 PLANNABLE = frozenset({TaskStatus.PROPUESTA, TaskStatus.PROGRAMADA, TaskStatus.CONFIRMADA})
+MAX_TITLE_CHARS = 200
+
+
+def clean(text: str, limit: int = MAX_TITLE_CHARS) -> str:
+    """Una sola línea, sin corchetes y con longitud acotada: el texto queda inerte (SEC-10).
+
+    Los títulos de los bloques se normalizan al construirlos, de modo que el plan en memoria,
+    la nota escrita y el plan releído al aprobar son idénticos.
+    """
+    single = " ".join(text.replace("[", "(").replace("]", ")").split())
+    return single if len(single) <= limit else single[: limit - 1] + "…"
 
 
 class BlockKind(StrEnum):
@@ -50,6 +61,7 @@ class Block:
             raise ValidationError("bloque", self.title, "solo los bloques de trabajo llevan tarea")
         if not self.title.strip():
             raise ValidationError("bloque", self.title, "el título no puede estar vacío")
+        object.__setattr__(self, "title", clean(self.title))
 
 
 class UnplannedCode(StrEnum):
@@ -115,7 +127,7 @@ class Conflict:
     day: date | None = None
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, eq=False)
 class PlanningContext:
     """Todo lo que el validador necesita, calculado por código antes de proponer."""
 
@@ -128,6 +140,10 @@ class PlanningContext:
     incomplete: tuple[Task, ...]
     not_before: datetime
 
+    def __post_init__(self) -> None:
+        # Copia de solo lectura: nadie puede cambiar las tareas tras validar.
+        object.__setattr__(self, "tasks", MappingProxyType(dict(self.tasks)))
+
     def day(self, day: date) -> DayCapacity | None:
         return next((capacity for capacity in self.days if capacity.day == day), None)
 
@@ -135,11 +151,18 @@ class PlanningContext:
         return moment.astimezone(self.zone).date()
 
 
+def next_minute(moment: datetime) -> datetime:
+    """Primer minuto entero no anterior a `moment`: los bloques siempre empiezan en HH:MM."""
+    whole = moment.replace(second=0, microsecond=0)
+    return whole if whole == moment else whole + timedelta(minutes=1)
+
+
 def build_context(
     schedule: Schedule, week: IsoWeek, tasks: Iterable[Task], *, now: datetime
 ) -> PlanningContext:
     if now.utcoffset() is None:
         raise ValidationError("ahora", now, "requiere zona horaria")
+    now = next_minute(now)
     by_id: dict[TaskId, Task] = {}
     incomplete: list[Task] = []
     for task in tasks:

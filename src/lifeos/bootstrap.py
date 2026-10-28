@@ -59,7 +59,11 @@ class Settings:
     @classmethod
     def from_env(cls, project_root: Path, environ: Mapping[str, str] | None = None) -> Self:
         process = dict(os.environ if environ is None else environ)
-        merged = {**read_dotenv(project_root / ENV_FILE), **{k: v for k, v in process.items() if v}}
+        try:
+            dotenv = read_dotenv(project_root / ENV_FILE)
+        except ValueError as error:  # el mensaje nombra el archivo y la línea, nunca valores
+            raise ConfigRejectedError(ENV_FILE, (str(error),)) from None
+        merged = {**dotenv, **{k: v for k, v in process.items() if v}}
         logs = merged.get("LIFEOS_LOGS_DIR") or str(project_root / DEFAULT_LOGS_DIR)
         vault = merged.get("LIFEOS_VAULT_PATH")
         return cls(

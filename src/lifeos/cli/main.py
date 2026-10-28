@@ -6,13 +6,15 @@ Solo traduce argumentos y resultados; las reglas viven en los casos de uso. Cód
 
 import argparse
 import sys
+import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import NoReturn, TextIO
 
 from lifeos.application.capture import capture
-from lifeos.application.jefe import PlanOutcome
+from lifeos.application.jefe import JefePlanner, PlanOutcome
 from lifeos.application.tasks import TaskQuery, query_tasks
+from lifeos.application.tools import AuditIncompleteError
 from lifeos.bootstrap import STARTUP_ERRORS, Runtime, Settings, build_runtime
 from lifeos.cli import output
 from lifeos.domain.errors import LifeOSError, ValidationError
@@ -20,6 +22,8 @@ from lifeos.domain.plan import PlanOrigin
 from lifeos.domain.task import Area, TaskStatus
 from lifeos.domain.weeks import IsoWeek
 from lifeos.ports.clock import Clock
+from lifeos.ports.llm import LlmError
+from lifeos.ports.vault import VaultStore
 
 EXIT_OK = 0
 EXIT_REFUSED = 1
@@ -32,9 +36,16 @@ class UsageError(Exception):
     """Argumentos no válidos; se informa sin la traza de argparse."""
 
 
+class SetupError(Exception):
+    """Falta algo en la configuración local para ejecutar la orden."""
+
+
 class _Parser(argparse.ArgumentParser):
     def error(self, message: str) -> NoReturn:
         raise UsageError(message)
+
+
+CONFIG_ERRORS: tuple[type[Exception], ...] = (SetupError, *STARTUP_ERRORS)
 
 
 def _week(text: str) -> IsoWeek:
@@ -65,21 +76,32 @@ def build_parser() -> argparse.ArgumentParser:
 # --- Órdenes ----------------------------------------------------------------------------------
 
 
+def _vault(runtime: Runtime) -> VaultStore:
+    if runtime.vault is None:
+        raise SetupError("falta LIFEOS_VAULT_PATH (ruta a tu bóveda) en el entorno o en .env")
+    return runtime.vault
+
+
+def _jefe(runtime: Runtime) -> JefePlanner:
+    if runtime.jefe is None:
+        raise SetupError("no hay agente Jefe configurado (config/agents/jefe.yaml y la política)")
+    return runtime.jefe
+
+
 def _capturar(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
-    assert runtime.vault is not None  # noqa: S101 - comprobado en _runtime
-    path = capture(runtime.vault, " ".join(args.texto), now=runtime.clock.now(), source=CLI_SOURCE)
+    text = " ".join(args.texto)
+    path = capture(_vault(runtime), text, now=runtime.clock.now(), source=CLI_SOURCE)
     return EXIT_OK, [f"Captura guardada en {path}"]
 
 
 def _tareas(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
-    assert runtime.vault is not None  # noqa: S101 - comprobado en _runtime
     query = TaskQuery(
         area=Area(args.area) if args.area else None,
         status=TaskStatus(args.estado) if args.estado else None,
         text=args.texto,
         include_archived=args.archivadas,
     )
-    return EXIT_OK, output.tasks(query_tasks(runtime.vault, query))
+    return EXIT_OK, output.tasks(query_tasks(_vault(runtime), query))
 
 
 def _plan(result: PlanOutcome) -> tuple[int, list[str]]:
@@ -87,14 +109,12 @@ def _plan(result: PlanOutcome) -> tuple[int, list[str]]:
 
 
 def _semana(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
-    assert runtime.jefe is not None  # noqa: S101 - comprobado en _runtime
     origin = PlanOrigin.IA if args.ia else PlanOrigin.HEURISTICA
-    return _plan(runtime.jefe.proponer(args.semana, origin=origin))
+    return _plan(_jefe(runtime).proponer(args.semana, origin=origin))
 
 
 def _aprobar(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
-    assert runtime.jefe is not None  # noqa: S101 - comprobado en _runtime
-    return _plan(runtime.jefe.aprobar(args.semana))
+    return _plan(_jefe(runtime).aprobar(args.semana))
 
 
 Command = Callable[[Runtime, argparse.Namespace], tuple[int, list[str]]]
@@ -117,9 +137,14 @@ def _runtime(
 ) -> Runtime:
     settings = Settings.from_env(project_root, environ)
     if settings.vault_path is None:
-        raise UsageError("falta LIFEOS_VAULT_PATH (ruta a tu bóveda) en el entorno o en .env")
+        raise SetupError("falta LIFEOS_VAULT_PATH (ruta a tu bóveda) en el entorno o en .env")
     with_llm = args.command == "semana" and args.ia
     return build_runtime(settings, with_llm=with_llm, clock=clock)
+
+
+def _printable(line: str) -> str:
+    """Sin caracteres de control: un título de la bóveda no puede manipular la terminal."""
+    return "".join(ch for ch in line if unicodedata.category(ch) != "Cc")
 
 
 def _utf8(stream: TextIO) -> TextIO:
@@ -147,13 +172,19 @@ def main(
     except UsageError as error:
         print(f"Error de uso: {error}", file=stderr)
         return EXIT_USAGE
-    except STARTUP_ERRORS as error:
-        print(f"Error de configuración: {error}", file=stderr)
+    except CONFIG_ERRORS as error:
+        print(f"Error de configuración: {_printable(str(error))}", file=stderr)
         return EXIT_USAGE
-    except LifeOSError as error:
-        print(f"Error: {error}", file=stderr)
+    except AuditIncompleteError as error:
+        print(f"Aviso: la escritura SÍ se hizo, pero no quedó auditada: {error}", file=stderr)
         return EXIT_REFUSED
-    print("\n".join(lines), file=stdout)
+    except LlmError as error:
+        print(f"Error del modelo: {error}. Puedes proponer sin --ia (heurística).", file=stderr)
+        return EXIT_REFUSED
+    except LifeOSError as error:
+        print(f"Error: {_printable(str(error))}", file=stderr)
+        return EXIT_REFUSED
+    print("\n".join(_printable(line) for line in lines), file=stdout)
     return code
 
 

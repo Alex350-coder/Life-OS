@@ -254,7 +254,7 @@ def test_prompt_states_validator_rules_and_bounds_titles(
     tools: ToolRegistry, write_note: WriteNote
 ) -> None:
     write_note(
-        "02-Proyectos/x.md",
+        "01-Universidad/x.md",  # el Jefe de las muestras lee 01-Universidad/
         "- [x] Hecha [id:: t-cccccc] [area:: proyectos] [esfuerzo:: 1h]\n"
         f"- [ ] {'L' * 500} [id:: t-dddddd] [area:: proyectos] [esfuerzo:: 1h]"
         " [depende:: t-cccccc]\n",
@@ -295,20 +295,18 @@ def test_model_block_in_the_past_is_rejected(
 
 
 def _cli(
-    tmp_path: Path, vault: Path, *argv: str, policy_without_jefe: bool = False
+    tmp_path: Path,
+    vault: Path,
+    *argv: str,
+    without_jefe: bool = False,
+    dotenv: str | None = None,
 ) -> tuple[int, str, str]:
     root = tmp_path / "project"
     shutil.copytree(PROJECT / "config", root / "config")
-    if policy_without_jefe:
+    if without_jefe:  # política válida, pero sin archivo de agente del Jefe
         (root / "config" / "agents" / "jefe.yaml").unlink()
-        policy = root / "config" / "permissions.yaml"
-        text = policy.read_text(encoding="utf-8")
-        policy.write_text(
-            text.replace("dueno_plan_global: jefe", "dueno_plan_global: coach").replace(
-                ", publicar_plan]", "]"
-            ),
-            encoding="utf-8",
-        )
+    if dotenv is not None:
+        (root / ".env").write_text(dotenv, encoding="utf-8")
     out, err = io.StringIO(), io.StringIO()
     code = main(
         list(argv),
@@ -322,16 +320,13 @@ def _cli(
 
 
 def test_cli_without_a_jefe_is_a_configuration_error(tmp_path: Path, root: Path) -> None:
-    code, _, err = _cli(tmp_path, root, "semana", policy_without_jefe=True)
+    code, _, err = _cli(tmp_path, root, "semana", without_jefe=True)
     assert code == 2
     assert "Jefe" in err
 
 
 def test_cli_malformed_dotenv_is_a_configuration_error(tmp_path: Path, root: Path) -> None:
-    project = tmp_path / "project"
-    project.mkdir()
-    (project / ".env").write_text("esto no es CLAVE=valor\n", encoding="utf-8")
-    code, _, err = _cli(tmp_path, root, "tareas")
+    code, _, err = _cli(tmp_path, root, "tareas", dotenv="esto no es CLAVE=valor\n")
     assert code == 2
     assert ".env" in err
 

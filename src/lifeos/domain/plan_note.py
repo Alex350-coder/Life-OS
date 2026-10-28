@@ -25,13 +25,15 @@ from lifeos.domain.plan import (
     PlanOrigin,
     PlanProposal,
     PlanStatus,
+    clean,
 )
 from lifeos.domain.schedule import TimeRange, Weekday
 from lifeos.domain.sections import section_lines
 from lifeos.domain.weeks import IsoWeek
 
-MAX_TITLE_CHARS = 200
 MAX_TEXT_CHARS = 2_000
+JUSTIFICATION_HEADING = "Justificación"
+NO_TEXT = "—"
 BLOCKS_HEADING = "Bloques por día"
 DAILY_BLOCK_SECTIONS = ("Lo no negociable", "Bloques", "Tiempo protegido")
 CLOSING_HEADING = "Cierre"
@@ -54,12 +56,6 @@ def daily_path(day: date) -> str:
     return f"Diario/{day.isoformat()}.md"
 
 
-def clean(text: str, limit: int = MAX_TITLE_CHARS) -> str:
-    """Una sola línea, sin corchetes y con longitud acotada: el texto queda inerte."""
-    single = " ".join(text.replace("[", "(").replace("]", ")").split())
-    return single if len(single) <= limit else single[: limit - 1] + "…"
-
-
 # --- Renderizado ------------------------------------------------------------------------------
 
 
@@ -70,9 +66,14 @@ def _hhmm(moment: datetime, zone: ZoneInfo, day: date) -> str:
     return f"{local:%H:%M}"
 
 
+def format_span(interval: Interval, zone: ZoneInfo) -> str:
+    """`HH:MM–HH:MM` en hora local; la medianoche siguiente se escribe `24:00`."""
+    day = interval.start.astimezone(zone).date()
+    return f"{_hhmm(interval.start, zone, day)}–{_hhmm(interval.end, zone, day)}"
+
+
 def _span_text(block: Block, zone: ZoneInfo) -> str:
-    day = block.interval.start.astimezone(zone).date()
-    return f"{_hhmm(block.interval.start, zone, day)}–{_hhmm(block.interval.end, zone, day)}"
+    return format_span(block.interval, zone)
 
 
 def _block_line(block: Block, zone: ZoneInfo) -> str:
@@ -94,14 +95,21 @@ def _bullets(items: Sequence[str], empty: str) -> list[str]:
 
 
 def render_weekly(
-    proposal: PlanProposal, context: PlanningContext, *, status: PlanStatus, generated: datetime
+    proposal: PlanProposal,
+    context: PlanningContext,
+    *,
+    status: PlanStatus,
+    generated: datetime,
+    approved_at: datetime | None = None,
 ) -> str:
     zone = context.zone
+    approval = [f"aprobado: {approved_at.isoformat()}"] if approved_at is not None else []
     lines = [
         "---",
         "tipo: semanal",
         f"semana: {proposal.week.render()}",
         f"estado_plan: {status.value}",
+        *approval,
         "generado_por: jefe",
         f"origen: {proposal.origin.value}",
         f"generado: {generated.isoformat()}",
@@ -142,7 +150,12 @@ def render_weekly(
     )
     lines += ["", "## Conflictos y alertas"]
     lines += _bullets([clean(alert) for alert in proposal.alerts], "Ninguno")
-    lines += ["", "## Justificación", clean(proposal.justification, MAX_TEXT_CHARS) or "—", ""]
+    lines += [
+        "",
+        f"## {JUSTIFICATION_HEADING}",
+        clean(proposal.justification, MAX_TEXT_CHARS) or NO_TEXT,
+        "",
+    ]
     return "\n".join(lines)
 
 
@@ -178,7 +191,25 @@ def render_daily(
     for heading in (CHECKIN_HEADING, CLOSING_HEADING):
         kept = section_lines(existing, heading) if existing is not None else None
         lines += [*(kept or (f"## {heading}",)), ""]
+    # Secciones propias del propietario en una nota ya existente: se conservan tal cual.
+    for heading in _other_sections(existing):
+        lines += [*(section_lines(existing or "", heading) or ()), ""]
     return "\n".join(lines)
+
+
+_OWN_SECTIONS = {h.casefold() for h in (*DAILY_BLOCK_SECTIONS, CHECKIN_HEADING, CLOSING_HEADING)}
+_H2_RE = re.compile(r"## (.+?)\s*")
+
+
+def _other_sections(existing: str | None) -> list[str]:
+    if existing is None:
+        return []
+    headings: list[str] = []
+    for line in split_lines(existing):
+        match = _H2_RE.fullmatch(line)
+        if match and match[1].casefold() not in _OWN_SECTIONS and match[1] not in headings:
+            headings.append(match[1])
+    return headings
 
 
 # --- Análisis ---------------------------------------------------------------------------------
@@ -192,6 +223,7 @@ class WeeklyNote:
     generated: datetime
     zone: ZoneInfo
     blocks: tuple[Block, ...]
+    justification: str
 
 
 def _frontmatter(lines: Sequence[str]) -> tuple[dict[str, str], int]:
@@ -242,10 +274,13 @@ def _block(line: str, day: date, zone: ZoneInfo) -> Block:
 
 
 def _section(lines: Sequence[str], heading: str) -> list[str]:
-    try:
-        start = lines.index(f"## {heading}")
-    except ValueError:
-        raise PlanNoteError(f"falta la sección '{heading}'") from None
+    title = f"## {heading}"
+    starts = [index for index, line in enumerate(lines) if line.rstrip() == title]
+    if not starts:
+        raise PlanNoteError(f"falta la sección '{heading}'")
+    if len(starts) > 1:
+        raise PlanNoteError(f"la sección '{heading}' está duplicada")
+    start = starts[0]
     end = next((i for i in range(start + 1, len(lines)) if lines[i].startswith("## ")), len(lines))
     return list(lines[start + 1 : end])
 
@@ -300,7 +335,13 @@ def parse_weekly(text: str) -> WeeklyNote:
         generated=generated,
         zone=zone,
         blocks=_weekly_blocks(lines, zone),
+        justification=_justification(lines),
     )
+
+
+def _justification(lines: Sequence[str]) -> str:
+    text = " ".join(line.strip() for line in _section(lines, JUSTIFICATION_HEADING) if line.strip())
+    return "" if text == NO_TEXT else clean(text, MAX_TEXT_CHARS)
 
 
 def parse_daily_blocks(text: str, day: date, zone: ZoneInfo) -> tuple[Block, ...]:
@@ -309,12 +350,3 @@ def parse_daily_blocks(text: str, day: date, zone: ZoneInfo) -> tuple[Block, ...
     for heading in DAILY_BLOCK_SECTIONS:
         blocks += [_block(line, day, zone) for line in _section(lines, heading) if line.strip()]
     return tuple(blocks)
-
-
-def approve_weekly(text: str, *, approved_at: datetime) -> str:
-    """Marca el plan como aprobado sin tocar nada más de la nota."""
-    if parse_weekly(text).status is not PlanStatus.PROPUESTO:
-        raise PlanNoteError("solo se aprueba un plan en estado propuesto")
-    old = f"estado_plan: {PlanStatus.PROPUESTO.value}\n"
-    new = f"estado_plan: {PlanStatus.APROBADO.value}\naprobado: {approved_at.isoformat()}\n"
-    return text.replace(old, new, 1)

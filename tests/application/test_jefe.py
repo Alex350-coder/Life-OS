@@ -52,7 +52,7 @@ COACH = ActorContext(agent_id="coach", correlation_id="c-coach")
 class OverlappingDrafter:
     """Doble de prueba: propone dos bloques que se solapan (como un modelo descuidado)."""
 
-    def draft(self, context: PlanningContext) -> PlanProposal:
+    def draft(self, context: PlanningContext, *, correlation_id: str) -> PlanProposal:
         return PlanProposal(
             week=context.week,
             blocks=(

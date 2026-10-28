@@ -233,9 +233,9 @@ def _suggestion(task: Task, context: PlanningContext) -> str:
     return f"Aplazar a la semana {context.week.next()}"
 
 
-def _place(task: Task, days: list[_Day], context: PlanningContext, out: _Outcome) -> None:
-    task_id = task.id
-    assert task_id is not None  # noqa: S101 - las candidatas siempre tienen id
+def _place(
+    task_id: TaskId, task: Task, days: list[_Day], context: PlanningContext, out: _Outcome
+) -> None:
     effort = _effort(task)
     problem = _blocking_problem(task, context, out)
     if problem is not None:
@@ -286,7 +286,8 @@ def propose(context: PlanningContext) -> PlanProposal:
     candidates = _candidates(context, out)
     days = _days(context)
     for task in _ordered(candidates, out):
-        _place(task, days, context, out)
+        if task.id is not None:  # las candidatas siempre tienen id
+            _place(task.id, task, days, context, out)
     return PlanProposal(
         week=context.week,
         blocks=(*fixed_and_protected_blocks(context), *_sorted(out.work)),

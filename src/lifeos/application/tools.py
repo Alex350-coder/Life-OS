@@ -15,18 +15,22 @@ from lifeos.application.capture import INBOX, capture
 from lifeos.application.checkin import append_checkin
 from lifeos.application.permissions import PUBLISH_TOOL, TOOL_WRITE_MODES, EffectivePermissions
 from lifeos.application.plan_publication import (
+    NoteWrite,
+    PartialPublicationError,
     PlanPublication,
     PlanRejectedError,
-    PublicationMismatchError,
     check_publication,
+    planned_writes,
 )
 from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.application.tasks import LocatedTask, TaskQuery, query_tasks
 from lifeos.domain.checkin import CheckInEntry
+from lifeos.domain.errors import LifeOSError
+from lifeos.domain.plan_note import weekly_path
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import WriteMode
 from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult, LogWriteError
-from lifeos.ports.vault import PathRejectedError, Snapshot, VaultPath, VaultStore, Version
+from lifeos.ports.vault import PathRejectedError, Snapshot, VaultPath, VaultStore
 
 _REJECTED_PATH = "(ruta rechazada)"
 
@@ -161,36 +165,37 @@ class ToolRegistry:
     ) -> tuple[VaultPath, ...]:
         """Publica un plan validado (SEC-09): solo el dueño del plan global, solo en modo plan.
 
-        Valida el plan y que el texto le corresponda antes de escribir; un rechazo se audita y
-        no escribe nada. Las notas diarias se escriben antes que la semanal, de modo que un
-        fallo a mitad deja el plan semanal sin marcar como aprobado.
+        Valida antes de escribir y escribe el render canónico del plan validado (el llamador no
+        aporta texto). Un rechazo se audita y no escribe nada. Las notas diarias van antes que
+        la semanal; si algo falla a mitad, `PartialPublicationError` dice qué quedó escrito.
         """
         tool = PUBLISH_TOOL
-        weekly_path = publication.weekly[0]
-        vault = self._scoped(actor, tool, str(weekly_path), TOOL_WRITE_MODES[tool])
+        target = weekly_path(publication.proposal.week)
+        vault = self._scoped(actor, tool, target, TOOL_WRITE_MODES[tool])
         try:
             check_publication(publication)
+            writes = planned_writes(vault, publication)
         except PlanRejectedError:
-            self._log(actor, tool, str(weekly_path), AuditResult.RECHAZADO, "plan_invalido")
+            self._log(actor, tool, target, AuditResult.RECHAZADO, "plan_invalido")
             raise
-        except PublicationMismatchError:
-            self._log(actor, tool, str(weekly_path), AuditResult.RECHAZADO, "texto_no_coincide")
+        except PermissionDeniedError as error:
+            raise self._deny(actor, tool, target, error) from None
+        except LifeOSError as error:
+            self._log(actor, tool, target, AuditResult.RECHAZADO, type(error).__name__)
             raise
-        written = []
-        for path, text, expected in (*publication.daily, publication.weekly):
-            written.append(
-                self._write(
-                    actor,
-                    tool,
-                    str(path),
-                    partial(_write_note, vault, path, text, expected),
+        written: list[VaultPath] = []
+        for write in writes:
+            try:
+                written.append(
+                    self._write(actor, tool, str(write.path), partial(_write_note, vault, write))
                 )
-            )
+            except LifeOSError as error:
+                if not written:
+                    raise
+                raise PartialPublicationError(tuple(written), error) from error
         return tuple(written)
 
 
-def _write_note(
-    vault: VaultStore, path: VaultPath, text: str, expected: Version | None
-) -> VaultPath:
-    vault.write(path, text, expected=expected)
-    return path
+def _write_note(vault: VaultStore, write: NoteWrite) -> VaultPath:
+    vault.write(write.path, write.text, expected=write.expected)
+    return write.path
