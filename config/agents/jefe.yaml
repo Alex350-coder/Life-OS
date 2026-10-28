@@ -1,5 +1,6 @@
 # Agente Jefe (ADR-0002, ADR-0004). Este archivo SOLICITA; la política decide.
-# El permiso de publicar el plan (modo plan) lo concede la política, no este archivo (Fase 3).
+# Pide la herramienta publicar_plan; el modo plan (Semanal/, Diario/) lo concede solo la política
+# al dueño del plan global (ADR-0002, SEC-09). Este archivo no puede solicitarlo.
 schema_version: 1
 id: jefe
 nombre: Jefe
@@ -10,7 +11,7 @@ modelo_solicitado:
 contrato:                      # provisional hasta el contrato del planificador (Fase 3)
   entrada: captura_v1
   salida: captura_v1
-herramientas: [leer_nota, listar_tareas, crear_captura]
+herramientas: [leer_nota, listar_tareas, crear_captura, publicar_plan]
 permisos_solicitados:
   lectura:
     - _sistema/

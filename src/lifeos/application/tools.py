@@ -9,17 +9,24 @@ auditan.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 
 from lifeos.application.capture import INBOX, capture
 from lifeos.application.checkin import append_checkin
-from lifeos.application.permissions import TOOL_WRITE_MODES, EffectivePermissions
+from lifeos.application.permissions import PUBLISH_TOOL, TOOL_WRITE_MODES, EffectivePermissions
+from lifeos.application.plan_publication import (
+    PlanPublication,
+    PlanRejectedError,
+    PublicationMismatchError,
+    check_publication,
+)
 from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.application.tasks import LocatedTask, TaskQuery, query_tasks
 from lifeos.domain.checkin import CheckInEntry
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import WriteMode
 from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult, LogWriteError
-from lifeos.ports.vault import PathRejectedError, VaultPath, VaultStore
+from lifeos.ports.vault import PathRejectedError, Snapshot, VaultPath, VaultStore, Version
 
 _REJECTED_PATH = "(ruta rechazada)"
 
@@ -120,6 +127,16 @@ class ToolRegistry:
         except PermissionDeniedError as error:
             raise self._deny(actor, tool, str(target), error) from None
 
+    def leer_nota_versionada(self, actor: ActorContext, path: str) -> Snapshot:
+        """Como `leer_nota`, con la versión para escribir después sin pisar ediciones."""
+        tool = "leer_nota"
+        target = self._parse(actor, tool, path)
+        vault = self._scoped(actor, tool, str(target), TOOL_WRITE_MODES[tool])
+        try:
+            return vault.read(target)
+        except PermissionDeniedError as error:
+            raise self._deny(actor, tool, str(target), error) from None
+
     def listar_tareas(self, actor: ActorContext, query: TaskQuery) -> tuple[LocatedTask, ...]:
         tool = "listar_tareas"
         vault = self._scoped(actor, tool, "(bóveda)", TOOL_WRITE_MODES[tool])
@@ -138,3 +155,42 @@ class ToolRegistry:
         target = self._parse(actor, tool, path)
         vault = self._scoped(actor, tool, str(target), TOOL_WRITE_MODES[tool])
         return self._write(actor, tool, str(target), lambda: append_checkin(vault, target, entry))
+
+    def publicar_plan(
+        self, actor: ActorContext, publication: PlanPublication
+    ) -> tuple[VaultPath, ...]:
+        """Publica un plan validado (SEC-09): solo el dueño del plan global, solo en modo plan.
+
+        Valida el plan y que el texto le corresponda antes de escribir; un rechazo se audita y
+        no escribe nada. Las notas diarias se escriben antes que la semanal, de modo que un
+        fallo a mitad deja el plan semanal sin marcar como aprobado.
+        """
+        tool = PUBLISH_TOOL
+        weekly_path = publication.weekly[0]
+        vault = self._scoped(actor, tool, str(weekly_path), TOOL_WRITE_MODES[tool])
+        try:
+            check_publication(publication)
+        except PlanRejectedError:
+            self._log(actor, tool, str(weekly_path), AuditResult.RECHAZADO, "plan_invalido")
+            raise
+        except PublicationMismatchError:
+            self._log(actor, tool, str(weekly_path), AuditResult.RECHAZADO, "texto_no_coincide")
+            raise
+        written = []
+        for path, text, expected in (*publication.daily, publication.weekly):
+            written.append(
+                self._write(
+                    actor,
+                    tool,
+                    str(path),
+                    partial(_write_note, vault, path, text, expected),
+                )
+            )
+        return tuple(written)
+
+
+def _write_note(
+    vault: VaultStore, path: VaultPath, text: str, expected: Version | None
+) -> VaultPath:
+    vault.write(path, text, expected=expected)
+    return path

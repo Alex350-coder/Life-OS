@@ -5,12 +5,17 @@ que la política concede. El prompt nunca es la barrera.
 - `CREAR`: solo notas nuevas (`expected is None`) bajo una raíz con permiso de creación.
 - `ANEXAR_SECCION`: solo notas existentes, y el texto nuevo debe ser el anterior más líneas
   insertadas dentro de la sección concedida.
-- `PLAN`: no disponible hasta la Fase 3 (publicación de un plan validado por el Jefe).
+- `PLAN` (SEC-09): solo las concesiones `plan` del dueño del plan global, solo notas con nombre
+  canónico (`Semanal/AAAA-Wnn.md`, `Diario/AAAA-MM-DD.md`) y, al republicar un diario, sin
+  alterar las secciones del Coach y del propietario (`Check-ins`, `Cierre`). Que el contenido
+  sea un plan validado lo garantiza la herramienta `publicar_plan`.
 """
+
+import re
 
 from lifeos.application.permissions import EffectivePermissions
 from lifeos.application.tasks import NOTE_SUFFIX, ApplicationError
-from lifeos.domain.sections import only_inserted_in_section
+from lifeos.domain.sections import only_inserted_in_section, section_lines
 from lifeos.ports.config import WriteGrant, WriteMode
 from lifeos.ports.vault import (
     Snapshot,
@@ -20,6 +25,15 @@ from lifeos.ports.vault import (
     VersionConflictError,
     within_any,
 )
+
+WEEKLY_ROOT = VaultPath("Semanal")
+DAILY_ROOT = VaultPath("Diario")
+PLAN_NOTE_NAMES = (
+    (WEEKLY_ROOT, re.compile(r"\d{4}-W\d{2}\.md")),
+    (DAILY_ROOT, re.compile(r"\d{4}-\d{2}-\d{2}\.md")),
+)
+# Secciones de la nota diaria que el plan nunca reescribe (Coach y propietario).
+PROTECTED_DAILY_SECTIONS = ("check-ins", "cierre")
 
 
 class PermissionDeniedError(ApplicationError):
@@ -69,16 +83,36 @@ class PolicyVault:
 
     # --- Escritura -------------------------------------------------------------------------
 
-    def _grants_for(self, path: VaultPath) -> tuple[WriteGrant, ...]:
-        if self._mode is None:
-            raise self._deny("solo_lectura", path)
-        if self._mode is WriteMode.PLAN:
-            raise self._deny("plan_no_disponible", path)
+    def _check_target(self, path: VaultPath) -> None:
         # Defensa en profundidad: aunque una concesión lo cubriera, estas raíces nunca se escriben.
         if within_any(path, self._perms.forbidden_write):
             raise self._deny("carpeta_prohibida", path)
         if not path.name.lower().endswith(NOTE_SUFFIX):
             raise self._deny("no_es_nota", path)
+
+    def _write_plan(self, path: VaultPath, text: str, expected: Version | None) -> Version:
+        self._check_target(path)
+        if not any(within_any(path, (grant.root,)) for grant in self._perms.plan_writes):
+            raise self._deny("escritura_no_autorizada", path)
+        if not any(
+            path.parent == root and pattern.fullmatch(path.name)
+            for root, pattern in PLAN_NOTE_NAMES
+        ):
+            raise self._deny("nombre_de_plan_invalido", path)
+        if expected is not None and within_any(path, (DAILY_ROOT,)):
+            current = self._inner.read(path)
+            if current.version != expected:
+                raise VersionConflictError(f"{path} cambió desde la última lectura")
+            for heading in PROTECTED_DAILY_SECTIONS:
+                old = section_lines(current.text, heading)
+                if old is not None and old != section_lines(text, heading):
+                    raise self._deny("seccion_protegida_alterada", path)
+        return self._inner.write(path, text, expected=expected)
+
+    def _grants_for(self, path: VaultPath) -> tuple[WriteGrant, ...]:
+        if self._mode is None:
+            raise self._deny("solo_lectura", path)
+        self._check_target(path)
         grants = tuple(
             grant
             for grant in self._perms.writes
@@ -89,6 +123,8 @@ class PolicyVault:
         return grants
 
     def write(self, path: VaultPath, text: str, *, expected: Version | None) -> Version:
+        if self._mode is WriteMode.PLAN:
+            return self._write_plan(path, text, expected)
         grants = self._grants_for(path)
         if self._mode is WriteMode.CREAR:
             if expected is not None:

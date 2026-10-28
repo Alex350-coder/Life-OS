@@ -3,6 +3,8 @@
 from dataclasses import replace
 
 import pytest
+
+from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.application.jefe import (
     JefePlanner,
     PlanAlreadyApprovedError,
@@ -13,9 +15,6 @@ from lifeos.application.plan_publication import (
     PlanRejectedError,
     PublicationMismatchError,
 )
-from lifeos.domain.plan_note import parse_weekly, render_weekly
-
-from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.application.policy_vault import PermissionDeniedError
 from lifeos.application.tasks import ApplicationError
 from lifeos.application.tools import ActorContext, ToolRegistry
@@ -30,6 +29,7 @@ from lifeos.domain.plan import (
     PlanStatus,
     fixed_and_protected_blocks,
 )
+from lifeos.domain.plan_note import parse_weekly, render_weekly
 from lifeos.ports.logs import AuditResult
 from lifeos.ports.vault import VaultPath
 from tests import config_samples as samples

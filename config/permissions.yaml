@@ -21,7 +21,7 @@ global:
 
 agentes:
   jefe:
-    herramientas: [leer_nota, listar_tareas, crear_captura]
+    herramientas: [leer_nota, listar_tareas, crear_captura, publicar_plan]
     lectura:
       - _sistema/
       - 00-Inbox/

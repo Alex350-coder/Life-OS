@@ -4,6 +4,10 @@ from collections import Counter
 from datetime import datetime
 
 import pytest
+
+from lifeos.domain.heuristic import propose
+from lifeos.domain.note import parse_note
+from lifeos.domain.plan import Block, BlockKind, PlanOrigin, PlanProposal, PlanStatus
 from lifeos.domain.plan_note import (
     PlanNoteError,
     approve_weekly,
@@ -14,10 +18,6 @@ from lifeos.domain.plan_note import (
     render_weekly,
     weekly_path,
 )
-
-from lifeos.domain.heuristic import propose
-from lifeos.domain.note import parse_note
-from lifeos.domain.plan import Block, BlockKind, PlanOrigin, PlanProposal, PlanStatus
 from lifeos.domain.sections import find_section
 from tests.planning_builders import LIMA, MON, NOW, SUN, TUE, WEEK, context, span, task, tid
 

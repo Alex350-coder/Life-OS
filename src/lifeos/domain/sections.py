@@ -78,6 +78,18 @@ def find_section(text: str, heading: str) -> SectionSpan | None:
     return _find(_lines(text), heading)
 
 
+def section_lines(text: str, heading: str) -> tuple[str, ...] | None:
+    """Líneas de la sección (título incluido) sin las líneas en blanco finales."""
+    lines = _lines(text)
+    span = _find(lines, heading)
+    if span is None:
+        return None
+    body = lines[span.heading_index : span.end]
+    while body and not body[-1].strip():
+        body.pop()
+    return tuple(body)
+
+
 def section_insert_index(text: str, span: SectionSpan) -> int:
     """Posición tras la última línea no vacía de la sección (o justo bajo su título)."""
     lines = _lines(text)

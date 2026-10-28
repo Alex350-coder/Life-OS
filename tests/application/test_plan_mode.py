@@ -8,7 +8,7 @@ from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.adapters.yaml_config import parse_agent, parse_catalog, parse_policy
 from lifeos.application.permissions import TOOL_WRITE_MODES, resolve_effective
 from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
-from lifeos.ports.config import ConfigRejectedError, WriteGrant, WriteMode
+from lifeos.ports.config import ConfigError, ConfigRejectedError, WriteGrant, WriteMode
 from lifeos.ports.vault import VaultPath
 from tests import config_samples as samples
 from tests.application.conftest import WriteNote
@@ -85,7 +85,8 @@ def test_owner_tool_without_plan_grants_in_the_policy_is_rejected() -> None:
 def test_agent_file_still_cannot_request_plan_mode() -> None:
     jefe = samples.jefe()
     jefe["permisos_solicitados"]["escritura"].append({"ruta": "Semanal/", "modo": "plan"})
-    with pytest.raises(ConfigRejectedError, match="modo plan"):
+    # El esquema del archivo de agente ni siquiera admite el modo plan.
+    with pytest.raises(ConfigError, match="modo"):
         _resolve(jefe=jefe)
 
 
