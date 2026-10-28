@@ -16,7 +16,7 @@ from lifeos.application.permissions import (
     resolve_effective,
 )
 
-KNOWN_CONTRACTS = frozenset({"captura_v1", "checkin_v1"})
+KNOWN_CONTRACTS = frozenset({"captura_v1", "checkin_v1", "plan_v1"})
 
 
 def dump(data: object) -> str:

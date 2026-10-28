@@ -295,3 +295,36 @@ def propose(context: PlanningContext) -> PlanProposal:
         origin=PlanOrigin.HEURISTICA,
         alerts=tuple(out.alerts),
     )
+
+
+def plannable_tasks(context: PlanningContext) -> tuple[Task, ...]:
+    """Tareas que se pueden programar (con id, área y esfuerzo), ordenadas por id."""
+    return tuple(_candidates(context, _Outcome()).values())
+
+
+def unplanned_after(
+    context: PlanningContext, work: Iterable[Block]
+) -> tuple[tuple[Unplanned, ...], tuple[str, ...]]:
+    """Lo que una propuesta ajena (p. ej., del modelo) deja sin planificar, más las alertas."""
+    out = _Outcome()
+    candidates = _candidates(context, out)
+    planned: dict[TaskId, int] = {}
+    for block in work:
+        if block.task_id is not None:
+            planned[block.task_id] = planned.get(block.task_id, 0) + block.interval.minutes
+    for task_id, task in candidates.items():
+        remaining = _effort(task) - planned.get(task_id, 0)
+        if remaining <= 0:
+            continue
+        code = UnplannedCode.NO_CABE_ENTERA if task_id in planned else UnplannedCode.SIN_CAPACIDAD
+        out.unplanned.append(
+            Unplanned(
+                task_id,
+                task.title,
+                remaining,
+                code,
+                f"la propuesta no le asigna {remaining} min",
+                _suggestion(task, context),
+            )
+        )
+    return tuple(out.unplanned), tuple(out.alerts)

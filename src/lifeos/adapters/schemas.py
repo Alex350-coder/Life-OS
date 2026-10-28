@@ -8,15 +8,23 @@ mensajes de error identifican el campo y el problema, nunca reproducen el texto 
 import json
 import re
 from collections.abc import Callable, Mapping
-from datetime import time
+from datetime import date, time
 from types import MappingProxyType
 from typing import Annotated, Any
 
-from pydantic import BaseModel, ConfigDict, StringConstraints, ValidationError
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from lifeos.domain.checkin import MAX_CHECKIN_CHARS, CheckInEntry
 from lifeos.domain.errors import ValidationError as DomainValidationError
-from lifeos.domain.proposals import MAX_DRAFT_CHARS, CaptureDraft
+from lifeos.domain.ids import TaskId
+from lifeos.domain.proposals import (
+    MAX_DRAFT_CHARS,
+    MAX_JUSTIFICATION_CHARS,
+    MAX_PLAN_BLOCKS,
+    CaptureDraft,
+    DraftBlock,
+    PlanDraft,
+)
 from lifeos.ports.llm import ModelOutputError, OutputSchema
 
 MAX_OUTPUT_CHARS = 64 * 1024
@@ -34,6 +42,23 @@ class _CaptureV1(_Strict):
 class _CheckinV1(_Strict):
     hora: Annotated[str, StringConstraints(pattern=r"^([01]\d|2[0-3]):[0-5]\d$")]
     texto: Annotated[str, StringConstraints(min_length=1, max_length=MAX_CHECKIN_CHARS)]
+
+
+_HHMM = r"^(([01]\d|2[0-3]):[0-5]\d|24:00)$"
+
+
+class _PlanBlockV1(_Strict):
+    tarea: Annotated[str, StringConstraints(pattern=r"^t-[23456789abcdefghjkmnpqrstvwxyz]{6}$")]
+    fecha: Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")]
+    inicio: Annotated[str, StringConstraints(pattern=_HHMM)]
+    fin: Annotated[str, StringConstraints(pattern=_HHMM)]
+
+
+class _PlanV1(_Strict):
+    """Solo trabajo: los fijos, el tiempo protegido y el estado no los decide el modelo."""
+
+    bloques: Annotated[list[_PlanBlockV1], Field(max_length=MAX_PLAN_BLOCKS)]
+    justificacion: Annotated[str, StringConstraints(max_length=MAX_JUSTIFICATION_CHARS)]
 
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -101,11 +126,30 @@ def _to_checkin(parsed: _CheckinV1) -> CheckInEntry:
     return CheckInEntry(time(int(hours), int(minutes)), parsed.texto)
 
 
+def _minutes(text: str) -> int:
+    hours, minutes = text.split(":")
+    return int(hours) * 60 + int(minutes)
+
+
+def _to_plan(parsed: _PlanV1) -> PlanDraft:
+    blocks = []
+    for item in parsed.bloques:
+        try:
+            day = date.fromisoformat(item.fecha)
+        except ValueError:
+            raise DomainValidationError("fecha", item.fecha, "fecha inexistente") from None
+        blocks.append(
+            DraftBlock(TaskId(item.tarea), day, _minutes(item.inicio), _minutes(item.fin))
+        )
+    return PlanDraft(tuple(blocks), parsed.justificacion)
+
+
 SCHEMAS: Mapping[str, OutputSchema[Any]] = MappingProxyType(
     {
         "captura_v1": PydanticOutputSchema(
             "captura_v1", _CaptureV1, lambda parsed: CaptureDraft(parsed.texto)
         ),
         "checkin_v1": PydanticOutputSchema("checkin_v1", _CheckinV1, _to_checkin),
+        "plan_v1": PydanticOutputSchema("plan_v1", _PlanV1, _to_plan),
     }
 )

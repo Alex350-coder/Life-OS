@@ -8,9 +8,9 @@ version: 1
 proposito: "Consolidar tareas y compromisos y proponer un plan viable para aprobación."
 modelo_solicitado:
   perfil: grande
-contrato:                      # provisional hasta el contrato del planificador (Fase 3)
-  entrada: captura_v1
-  salida: captura_v1
+contrato:                      # propuesta semanal con IA (F3-T06); siempre pasa el validador
+  entrada: plan_v1
+  salida: plan_v1
 herramientas: [leer_nota, listar_tareas, crear_captura, publicar_plan]
 permisos_solicitados:
   lectura:

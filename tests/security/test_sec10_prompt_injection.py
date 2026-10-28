@@ -4,12 +4,12 @@ permisos ni el plan; la salida del modelo pasa por el esquema y por el validador
 import json
 
 import pytest
-from lifeos.application.jefe_ai import SYSTEM_PROMPT, AiPlanDrafter, build_messages
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.adapters.schemas import SCHEMAS
 from lifeos.adapters.yaml_config import parse_catalog
 from lifeos.application.jefe import JefePlanner
+from lifeos.application.jefe_ai import SYSTEM_PROMPT, AiPlanDrafter, build_messages
 from lifeos.application.llm_calls import ModelGateway
 from lifeos.application.policy_vault import PermissionDeniedError
 from lifeos.application.tools import ActorContext, ToolRegistry
