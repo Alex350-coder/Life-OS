@@ -6,7 +6,9 @@ El Coach decide el tono, el micro-paso y cuándo escalar al Jefe; nunca cambia t
 from datetime import date
 
 import pytest
+
 from lifeos.domain.adjustments import AdjustmentKind
+from lifeos.domain.checkin import MAX_CHECKIN_CHARS
 from lifeos.domain.coach import (
     MAX_MICRO_STEP_MINUTES,
     CheckInState,
@@ -19,8 +21,6 @@ from lifeos.domain.coach import (
     micro_step_for,
     next_block,
 )
-
-from lifeos.domain.checkin import MAX_CHECKIN_CHARS
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.ids import TaskId
 from lifeos.domain.plan import Block

@@ -4,6 +4,7 @@ analizables de forma determinista, sin campos en línea ni permisos nuevos."""
 from datetime import time
 
 import pytest
+
 from lifeos.domain.adjustments import (
     Adjustment,
     AdjustmentKind,
@@ -11,7 +12,6 @@ from lifeos.domain.adjustments import (
     parse_adjustments,
     pending,
 )
-
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.schedule import TimeRange
 from lifeos.domain.sections import only_inserted_in_section
