@@ -6,15 +6,17 @@ que la política concede. El prompt nunca es la barrera.
 - `ANEXAR_SECCION`: solo notas existentes, y el texto nuevo debe ser el anterior más líneas
   insertadas dentro de la sección concedida.
 - `PLAN` (SEC-09): solo las concesiones `plan` del dueño del plan global, solo notas con nombre
-  canónico (`Semanal/AAAA-Wnn.md`, `Diario/AAAA-MM-DD.md`) y, al republicar un diario, sin
-  alterar las secciones del Coach y del propietario (`Check-ins`, `Cierre`). Que el contenido
-  sea un plan validado lo garantiza la herramienta `publicar_plan`.
+  canónico (`Semanal/AAAA-Wnn.md`, revisiones `Semanal/AAAA-Wnn-rN.md`, `Diario/AAAA-MM-DD.md`),
+  sin reescribir nunca un semanal aprobado (ADR-0011) y, al republicar un diario, sin alterar
+  las secciones del Coach y del propietario (`Check-ins`, `Cierre`). Que el contenido sea un
+  plan validado lo garantiza la herramienta `publicar_plan`.
 """
 
 import re
 
 from lifeos.application.permissions import EffectivePermissions
 from lifeos.application.tasks import NOTE_SUFFIX, ApplicationError
+from lifeos.domain.plan_note import is_approved
 from lifeos.domain.sections import only_inserted_in_section, section_lines
 from lifeos.ports.config import WriteGrant, WriteMode
 from lifeos.ports.vault import (
@@ -29,7 +31,7 @@ from lifeos.ports.vault import (
 WEEKLY_ROOT = VaultPath("Semanal")
 DAILY_ROOT = VaultPath("Diario")
 PLAN_NOTE_NAMES = (
-    (WEEKLY_ROOT, re.compile(r"[0-9]{4}-W[0-9]{2}\.md")),
+    (WEEKLY_ROOT, re.compile(r"[0-9]{4}-W[0-9]{2}(-r([1-9]|1[0-9]|20))?\.md")),
     (DAILY_ROOT, re.compile(r"[0-9]{4}-[0-9]{2}-[0-9]{2}\.md")),
 )
 # Secciones de la nota diaria que el plan nunca reescribe (Coach y propietario).
@@ -99,6 +101,13 @@ class PolicyVault:
             for root, pattern in PLAN_NOTE_NAMES
         ):
             raise self._deny("nombre_de_plan_invalido", path)
+        # ADR-0011: un plan aprobado no se reescribe; una revisión es una nota nueva.
+        if (
+            expected is not None
+            and within_any(path, (WEEKLY_ROOT,))
+            and is_approved(self._inner.read(path).text)
+        ):
+            raise self._deny("plan_aprobado_inmutable", path)
         if expected is not None and within_any(path, (DAILY_ROOT,)):
             current = self._inner.read(path)
             if current.version != expected:

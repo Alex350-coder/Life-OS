@@ -9,9 +9,16 @@ from dataclasses import dataclass
 from datetime import date, datetime
 
 from lifeos.application.tasks import ApplicationError
-from lifeos.domain.plan import Conflict, PlanningContext, PlanProposal, PlanStatus
-from lifeos.domain.plan_note import daily_path, render_daily, render_weekly, weekly_path
+from lifeos.domain.plan import Block, Conflict, PlanningContext, PlanProposal, PlanStatus
+from lifeos.domain.plan_note import (
+    daily_path,
+    render_daily,
+    render_weekly,
+    revision_path,
+    weekly_path,
+)
 from lifeos.domain.plan_validator import validate_plan
+from lifeos.domain.replan import check_history
 from lifeos.ports.vault import NoteNotFoundError, VaultPath, VaultStore, Version
 
 
@@ -23,6 +30,18 @@ class PlanPublication:
     generated: datetime
     weekly_expected: Version | None = None  # versión de la nota semanal que se reemplaza
     approved_at: datetime | None = None
+    # Revisión de una semana aprobada (ADR-0011): número, nota revisada, corte e historia.
+    revision: int = 0
+    revises: str | None = None
+    cutoff: datetime | None = None
+    history: tuple[Block, ...] = ()
+    expected_history: tuple[Block, ...] = ()  # historia según el plan revisado
+    adjustments: tuple[str, ...] = ()
+
+    @property
+    def weekly_target(self) -> str:
+        week = self.proposal.week
+        return revision_path(week, self.revision) if self.revision else weekly_path(week)
 
 
 @dataclass(frozen=True, slots=True)
@@ -60,14 +79,33 @@ def check_publication(publication: PlanPublication) -> None:
     """Paso obligatorio antes de escribir: el plan es viable y la petición es coherente."""
     if publication.status is PlanStatus.APROBADO and publication.approved_at is None:
         raise PublicationMismatchError("un plan aprobado necesita el momento de la aprobación")
+    if publication.revision and (publication.cutoff is None or publication.revises is None):
+        raise PublicationMismatchError("una revisión necesita el corte y la nota que revisa")
     conflicts = validate_plan(publication.proposal, publication.context)
+    if publication.revision:
+        conflicts += check_history(
+            publication.history,
+            publication.expected_history,
+            publication.proposal.work_blocks(),
+        )
     if conflicts:
         raise PlanRejectedError(conflicts)
 
 
-def _days(publication: PlanPublication) -> list[date]:
+def _blocks(publication: PlanPublication) -> tuple[Block, ...]:
+    return (*publication.history, *publication.proposal.blocks)
+
+
+def _days(vault: VaultStore, publication: PlanPublication) -> list[date]:
+    """Días a publicar. Una revisión nunca reescribe un día anterior al corte."""
     context = publication.context
-    return sorted({context.local_day(b.interval.start) for b in publication.proposal.blocks})
+    with_blocks = {context.local_day(b.interval.start) for b in _blocks(publication)}
+    if publication.cutoff is None:
+        return sorted(with_blocks)
+    first = context.local_day(publication.cutoff)
+    # Un día que se quedó sin bloques también se republica para no dejar el plan anterior.
+    existing = {d for d in context.week.days() if vault.exists(VaultPath.parse(daily_path(d)))}
+    return sorted(d for d in with_blocks | existing if d >= first)
 
 
 def _daily_write(vault: VaultStore, publication: PlanPublication, day: date) -> NoteWrite:
@@ -78,7 +116,7 @@ def _daily_write(vault: VaultStore, publication: PlanPublication, day: date) -> 
         existing = None
     text = render_daily(
         day,
-        publication.proposal.blocks,
+        _blocks(publication),
         zone=publication.context.zone,
         week=publication.proposal.week,
         existing=existing.text if existing else None,
@@ -89,17 +127,22 @@ def _daily_write(vault: VaultStore, publication: PlanPublication, day: date) -> 
 def planned_writes(vault: VaultStore, publication: PlanPublication) -> tuple[NoteWrite, ...]:
     """Notas a escribir, en orden: las diarias (solo si está aprobado) y la semanal al final."""
     weekly = NoteWrite(
-        VaultPath.parse(weekly_path(publication.proposal.week)),
+        VaultPath.parse(publication.weekly_target),
         render_weekly(
             publication.proposal,
             publication.context,
             status=publication.status,
             generated=publication.generated,
             approved_at=publication.approved_at,
+            revision=publication.revision,
+            revises=publication.revises,
+            cutoff=publication.cutoff,
+            history=publication.history,
+            adjustments=publication.adjustments,
         ),
         publication.weekly_expected,
     )
     if publication.status is not PlanStatus.APROBADO:
         return (weekly,)
-    daily = tuple(_daily_write(vault, publication, day) for day in _days(publication))
+    daily = tuple(_daily_write(vault, publication, day) for day in _days(vault, publication))
     return (*daily, weekly)

@@ -32,6 +32,8 @@ from lifeos.domain.sections import section_lines
 from lifeos.domain.weeks import IsoWeek
 
 MAX_TEXT_CHARS = 2_000
+MAX_REVISIONS = 20
+ADJUSTMENTS_HEADING = "Ajustes atendidos"
 JUSTIFICATION_HEADING = "Justificación"
 NO_TEXT = "—"
 BLOCKS_HEADING = "Bloques por día"
@@ -54,6 +56,26 @@ def weekly_path(week: IsoWeek) -> str:
 
 def daily_path(day: date) -> str:
     return f"Diario/{day.isoformat()}.md"
+
+
+def revision_path(week: IsoWeek, number: int) -> str:
+    """Revisión N del plan de la semana (ADR-0011): `Semanal/AAAA-Wnn-rN.md`, N de 1 a 20."""
+    if not 1 <= number <= MAX_REVISIONS:
+        raise ValueError(f"la revisión debe estar entre 1 y {MAX_REVISIONS}")
+    return f"Semanal/{week.render()}-r{number}.md"
+
+
+def is_approved(text: str) -> bool:
+    """La nota declara `estado_plan: aprobado` en su frontmatter (sin analizar el resto)."""
+    lines = split_lines(text.removeprefix("﻿"))
+    if not lines or lines[0] != "---":
+        return False
+    for line in lines[1:]:
+        if line == "---":
+            return False
+        if line.strip() == f"estado_plan: {PlanStatus.APROBADO.value}":
+            return True
+    return False
 
 
 # --- Renderizado ------------------------------------------------------------------------------
@@ -101,15 +123,31 @@ def render_weekly(
     status: PlanStatus,
     generated: datetime,
     approved_at: datetime | None = None,
+    revision: int = 0,
+    revises: str | None = None,
+    cutoff: datetime | None = None,
+    history: Sequence[Block] = (),
+    adjustments: Sequence[str] = (),
 ) -> str:
+    """Nota semanal. Una revisión (ADR-0011) añade `revision`, `revisa` y `desde`, la historia
+    anterior al corte en sus días y la sección de ajustes atendidos."""
     zone = context.zone
     approval = [f"aprobado: {approved_at.isoformat()}"] if approved_at is not None else []
+    if revision and (revises is None or cutoff is None):
+        raise ValidationError("revisión", revision, "necesita la nota que revisa y el corte")
+    revision_fields = (
+        [f"revision: {revision}", f"revisa: {revises}", f"desde: {cutoff.isoformat()}"]
+        if revision and revises is not None and cutoff is not None
+        else []
+    )
+    blocks = (*history, *proposal.blocks)
     lines = [
         "---",
         "tipo: semanal",
         f"semana: {proposal.week.render()}",
         f"estado_plan: {status.value}",
         *approval,
+        *revision_fields,
         "generado_por: jefe",
         f"origen: {proposal.origin.value}",
         f"generado: {generated.isoformat()}",
@@ -127,7 +165,7 @@ def render_weekly(
     lines += ["", f"## {BLOCKS_HEADING}"]
     for day in proposal.week.days():
         lines.append(f"### {_day_label(day)}")
-        lines += [_block_line(b, zone) for b in _of_day(proposal.blocks, day, zone)]
+        lines += [_block_line(b, zone) for b in _of_day(blocks, day, zone)]
         lines.append("")
     protected = [b for b in proposal.blocks if b.kind is BlockKind.PROTEGIDO]
     lines.append("## Tiempo protegido reservado")
@@ -150,6 +188,9 @@ def render_weekly(
     )
     lines += ["", "## Conflictos y alertas"]
     lines += _bullets([clean(alert) for alert in proposal.alerts], "Ninguno")
+    if revision:
+        lines += ["", f"## {ADJUSTMENTS_HEADING}"]
+        lines += _bullets([clean(item) for item in adjustments], "Ninguno")
     lines += [
         "",
         f"## {JUSTIFICATION_HEADING}",
@@ -224,6 +265,25 @@ class WeeklyNote:
     zone: ZoneInfo
     blocks: tuple[Block, ...]
     justification: str
+    revision: int = 0
+    revises: str | None = None
+    cutoff: datetime | None = None  # corte de una revisión: lo anterior es historia
+
+    def history(self) -> tuple[Block, ...]:
+        """Trabajo que empezó antes del corte: ya ocurrió y no se vuelve a validar."""
+        if self.cutoff is None:
+            return ()
+        cut = self.cutoff.timestamp()
+        return tuple(
+            b
+            for b in self.blocks
+            if b.kind is BlockKind.TRABAJO and b.interval.start.timestamp() < cut
+        )
+
+    def plan_blocks(self) -> tuple[Block, ...]:
+        """Bloques del plan que se validan: todo menos la historia."""
+        past = set(self.history())
+        return tuple(b for b in self.blocks if b not in past)
 
 
 def _frontmatter(lines: Sequence[str]) -> tuple[dict[str, str], int]:
@@ -328,6 +388,7 @@ def parse_weekly(text: str) -> WeeklyNote:
     if generated.utcoffset() is None:
         raise PlanNoteError("'generado' requiere zona horaria")
     zone = _zone(_required(fields, "zona"))
+    revision, revises, cutoff = _revision(fields)
     return WeeklyNote(
         week=week,
         status=_enum(PlanStatus, _required(fields, "estado_plan"), "estado_plan"),
@@ -336,7 +397,34 @@ def parse_weekly(text: str) -> WeeklyNote:
         zone=zone,
         blocks=_weekly_blocks(lines, zone),
         justification=_justification(lines),
+        revision=revision,
+        revises=revises,
+        cutoff=cutoff,
     )
+
+
+_REVISION_RE = re.compile(r"[1-9][0-9]?")
+_REVISES_RE = re.compile(r"Semanal/[0-9]{4}-W[0-9]{2}(-r[1-9][0-9]?)?\.md")
+
+
+def _revision(fields: dict[str, str]) -> tuple[int, str | None, datetime | None]:
+    if "revision" not in fields:
+        if "revisa" in fields or "desde" in fields:
+            raise PlanNoteError("'revisa' y 'desde' solo van en una revisión")
+        return 0, None, None
+    text = fields["revision"]
+    if not _REVISION_RE.fullmatch(text) or int(text) > MAX_REVISIONS:
+        raise PlanNoteError(f"revision debe ser un número de 1 a {MAX_REVISIONS}")
+    revises = _required(fields, "revisa")
+    if not _REVISES_RE.fullmatch(revises):
+        raise PlanNoteError("'revisa' debe nombrar una nota semanal (Semanal/AAAA-Wnn[-rN].md)")
+    try:
+        cutoff = datetime.fromisoformat(_required(fields, "desde"))
+    except ValueError:
+        raise PlanNoteError("'desde' no es una fecha y hora ISO") from None
+    if cutoff.utcoffset() is None:
+        raise PlanNoteError("'desde' requiere zona horaria")
+    return int(text), revises, cutoff
 
 
 def _justification(lines: Sequence[str]) -> str:

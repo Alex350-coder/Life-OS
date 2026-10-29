@@ -5,7 +5,6 @@ from collections.abc import Iterable
 from datetime import date, time
 
 import pytest
-from lifeos.domain.replan import adjust_context, check_history, planning_floor, split_history
 
 from lifeos.domain.adjustments import Adjustment, AdjustmentKind
 from lifeos.domain.capacity import DayCapacity
@@ -19,6 +18,7 @@ from lifeos.domain.plan_note import (
     render_weekly,
     revision_path,
 )
+from lifeos.domain.replan import adjust_context, check_history, planning_floor, split_history
 from lifeos.domain.schedule import TimeRange
 from tests.planning_builders import MON, NOW, TUE, WEEK, at, context, task, tid, work
 from tests.planning_samples import HORARIO

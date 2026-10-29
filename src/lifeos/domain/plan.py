@@ -118,6 +118,7 @@ class ConflictCode(StrEnum):
     NO_DIVISIBLE_PARTIDA = "no_divisible_partida"
     DEPENDENCIA = "dependencia"
     DESPUES_DE_FECHA_LIMITE = "despues_de_fecha_limite"
+    HISTORIAL_ALTERADO = "historial_alterado"
 
 
 @dataclass(frozen=True, slots=True)

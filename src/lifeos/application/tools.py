@@ -26,7 +26,6 @@ from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.application.tasks import LocatedTask, TaskQuery, query_tasks
 from lifeos.domain.checkin import CheckInEntry
 from lifeos.domain.errors import LifeOSError
-from lifeos.domain.plan_note import weekly_path
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import WriteMode
 from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult, LogWriteError
@@ -170,7 +169,7 @@ class ToolRegistry:
         la semanal; si algo falla a mitad, `PartialPublicationError` dice qué quedó escrito.
         """
         tool = PUBLISH_TOOL
-        target = weekly_path(publication.proposal.week)
+        target = publication.weekly_target
         vault = self._scoped(actor, tool, target, TOOL_WRITE_MODES[tool])
         try:
             check_publication(publication)
