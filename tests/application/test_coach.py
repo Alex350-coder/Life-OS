@@ -7,12 +7,12 @@ import json
 from datetime import datetime
 
 import pytest
-from lifeos.application.coach import CoachSession, NoDailyPlanError
-from lifeos.application.coach_ai import SYSTEM_PROMPT, AiCoachWriter
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.adapters.schemas import SCHEMAS
 from lifeos.adapters.yaml_config import parse_catalog
+from lifeos.application.coach import CoachSession, NoDailyPlanError
+from lifeos.application.coach_ai import SYSTEM_PROMPT, AiCoachWriter
 from lifeos.application.llm_calls import ModelGateway
 from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.application.tasks import ApplicationError
@@ -57,6 +57,7 @@ def seeded(write_note: WriteNote) -> None:
     write_note("01-Universidad/redes.md", TASKS)
     write_note(str(MONDAY), monday_note())
     write_note(str(TUESDAY), tuesday_note())
+    write_note("Semanal/2026-W45.md", "---\ntipo: semanal\n---\n\n## Check-ins\n")
 
 
 def _session(

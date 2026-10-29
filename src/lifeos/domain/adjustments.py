@@ -32,9 +32,9 @@ class AdjustmentKind(StrEnum):
 
 
 _ENTRY_RE = re.compile(
-    rf"- ([01]\d|2[0-3]):([0-5]\d) — {MARKER} "
+    rf"- ([01][0-9]|2[0-3]):([0-5][0-9]) — {MARKER} "
     rf"(?P<kind>{AdjustmentKind.BLOQUE_PERDIDO.value}|{AdjustmentKind.REDUCIR_HOY.value})"
-    r"(?: · (?P<span>\d{2}:\d{2}–\d{2}:\d{2}) · (?P<task>t-[23456789a-z]{6}))?"
+    r"(?: · (?P<span>[0-9]{2}:[0-9]{2}–[0-9]{2}:[0-9]{2}) · (?P<task>t-[23456789a-z]{6}))?"
 )
 
 
@@ -86,11 +86,15 @@ def _parse(line: str, day: date) -> Adjustment | None:
 
 
 def _key(adjustment: Adjustment) -> tuple[object, ...]:
-    return adjustment.day, adjustment.kind, adjustment.span, adjustment.task_id
+    # La hora forma parte de la clave: la misma propuesta repetida tras una revisión es nueva.
+    return adjustment.day, adjustment.at, adjustment.kind, adjustment.span, adjustment.task_id
 
 
 def parse_adjustments(text: str, day: date) -> tuple[Adjustment, ...]:
-    """Propuestas de la sección `## Check-ins` de la nota diaria de `day`, sin repetidas."""
+    """Propuestas de la sección `## Check-ins` de `day`, sin repetidas exactas.
+
+    Una sección `Check-ins` duplicada es ambigua y se rechaza (`ValidationError`).
+    """
     lines = section_lines(text, CHECKIN_SECTION) or ()
     found: dict[tuple[object, ...], Adjustment] = {}
     for line in lines[1:]:

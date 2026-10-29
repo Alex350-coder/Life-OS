@@ -5,6 +5,7 @@ plan ni cambia tareas: un "hecho" solo se registra y se confirma en el cierre, y
 nunca cuenta como cumplimiento. Durante el tiempo protegido no empuja a trabajar.
 """
 
+import unicodedata
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
 from datetime import datetime, time
@@ -23,6 +24,8 @@ MAX_MICRO_STEP_CHARS = 120
 MAX_TITLE_IN_MESSAGE = 60
 NOTE_PREFIX = "nota: "
 MINUTES_PER_HOUR = 60
+_ALLOWED_SPACES = frozenset(" \t")
+_INVISIBLE_CATEGORIES = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
 
 
 class CheckInState(StrEnum):
@@ -98,11 +101,13 @@ def in_protected(blocks: Iterable[Block], now: datetime) -> Block | None:
     )
 
 
-def _block_of(task_id: TaskId, blocks: Sequence[Block], now: datetime) -> Block:
+def _block_of(task_id: TaskId, blocks: Sequence[Block], now: datetime, *, missed: bool) -> Block:
     own = [b for b in _work(blocks) if b.task_id == task_id]
     if not own:
         raise ValidationError("tarea", str(task_id), "no tiene bloques en el plan de hoy")
     started = [b for b in own if b.interval.start.timestamp() <= now.timestamp()]
+    if missed and not started:
+        raise ValidationError("tarea", str(task_id), "su bloque de hoy aún no empezó")
     return started[-1] if started else own[0]
 
 
@@ -126,7 +131,8 @@ def _title(block: Block | None) -> str:
     return clean(block.title, MAX_TITLE_IN_MESSAGE) if block is not None else ""
 
 
-def _local_span(block: Block, zone: ZoneInfo) -> TimeRange:
+def block_span(block: Block, zone: ZoneInfo) -> TimeRange:
+    """Horario local `HH:MM–HH:MM` del bloque (la medianoche siguiente es 24:00)."""
     start = block.interval.start.astimezone(zone)
     end = block.interval.end.astimezone(zone)
     end_minutes = end.hour * MINUTES_PER_HOUR + end.minute
@@ -147,9 +153,19 @@ def micro_step_for(block: Block | None) -> MicroStep:
     )
 
 
+def _single_line(note: str) -> str:
+    """Rechaza saltos de línea Unicode y caracteres de control en lugar de unirlos en silencio."""
+    for char in note:
+        if char in _ALLOWED_SPACES:
+            continue
+        if char.isspace() or unicodedata.category(char) in _INVISIBLE_CATEGORIES:
+            raise ValidationError("nota", "…", "contiene saltos o caracteres de control")
+    return " ".join(note.split())
+
+
 def _record(state: CheckInState, task_id: TaskId | None, note: str, at: time) -> CheckInEntry:
     head = f"estado: {state.value}" + (f" · {task_id}" if task_id is not None else "")
-    text = " ".join(note.split())
+    text = _single_line(note)
     if text:
         room = MAX_CHECKIN_CHARS - len(head) - len(" · ") - len(NOTE_PREFIX)
         cut = text if len(text) <= room else text[: room - 1] + "…"
@@ -186,7 +202,7 @@ def _reply(
             adjustment=relief,
         )
     if state is CheckInState.PERDIDO and block is not None and block.task_id is not None:
-        span = _local_span(block, zone)
+        span = block_span(block, zone)
         missed = Adjustment(local.date(), at, AdjustmentKind.BLOQUE_PERDIDO, span, block.task_id)
         return _Reply(
             ReplyKind.REPLANIFICAR,
@@ -223,14 +239,21 @@ def decide(
     task_id: TaskId | None = None,
     note: str = "",
 ) -> CoachDecision:
-    """Respuesta, registro y propuesta (si corresponde) para un check-in."""
+    """Respuesta, registro y propuesta (si corresponde) para un check-in.
+
+    Solo cuentan los bloques del día local de `now`; un bloque perdido debe haber empezado.
+    """
+    if now.utcoffset() is None:
+        raise ValidationError("ahora", now, "requiere zona horaria")
+    local = now.astimezone(zone)
+    blocks = [b for b in blocks if b.interval.start.astimezone(zone).date() == local.date()]
+    missed = state is CheckInState.PERDIDO
     if task_id is not None:
-        block: Block | None = _block_of(task_id, blocks, now)
-    elif state is CheckInState.PERDIDO:
+        block: Block | None = _block_of(task_id, blocks, now, missed=missed)
+    elif missed:
         block = _missed_block(blocks, now)
     else:
         block = current_block(blocks, now)
-    local = now.astimezone(zone)
     if task_id is None and state is CheckInState.PERDIDO and block is not None:
         task_id = block.task_id  # el registro dice qué bloque se dio por perdido
     record = _record(state, task_id, note, time(local.hour, local.minute))

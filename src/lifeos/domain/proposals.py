@@ -3,8 +3,10 @@
 from dataclasses import dataclass
 from datetime import date
 
+from lifeos.domain.coach import MicroStep
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.ids import TaskId
+from lifeos.domain.plan import clean
 
 MAX_DRAFT_CHARS = 20_000  # mismo límite que una captura manual
 
@@ -56,3 +58,24 @@ class PlanDraft:
             raise ValidationError(
                 "justificación", len(self.justification), f"máximo {MAX_JUSTIFICATION_CHARS}"
             )
+
+
+MAX_COACH_MESSAGE_CHARS = 280
+
+
+@dataclass(frozen=True, slots=True)
+class CoachDraft:
+    """Mensaje del Coach redactado por un modelo (contrato `coach_v1`).
+
+    Solo se muestra: el registro del check-in y las propuestas al Jefe los decide el código. El
+    texto se reduce a una línea inerte, sin corchetes.
+    """
+
+    message: str
+    micro_step: MicroStep | None = None
+
+    def __post_init__(self) -> None:
+        message = clean(self.message, MAX_COACH_MESSAGE_CHARS)
+        if not message:
+            raise ValidationError("mensaje", "", "no puede estar vacío")
+        object.__setattr__(self, "message", message)

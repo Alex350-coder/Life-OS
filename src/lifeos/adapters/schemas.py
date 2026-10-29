@@ -15,13 +15,16 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
 from lifeos.domain.checkin import MAX_CHECKIN_CHARS, CheckInEntry
+from lifeos.domain.coach import MAX_MICRO_STEP_CHARS, MAX_MICRO_STEP_MINUTES, MicroStep
 from lifeos.domain.errors import ValidationError as DomainValidationError
 from lifeos.domain.ids import TaskId
 from lifeos.domain.proposals import (
+    MAX_COACH_MESSAGE_CHARS,
     MAX_DRAFT_CHARS,
     MAX_JUSTIFICATION_CHARS,
     MAX_PLAN_BLOCKS,
     CaptureDraft,
+    CoachDraft,
     DraftBlock,
     PlanDraft,
 )
@@ -59,6 +62,18 @@ class _PlanV1(_Strict):
 
     bloques: Annotated[list[_PlanBlockV1], Field(max_length=MAX_PLAN_BLOCKS)]
     justificacion: Annotated[str, StringConstraints(max_length=MAX_JUSTIFICATION_CHARS)]
+
+
+class _MicroStepV1(_Strict):
+    accion: Annotated[str, StringConstraints(min_length=1, max_length=MAX_MICRO_STEP_CHARS)]
+    minutos: Annotated[int, Field(ge=1, le=MAX_MICRO_STEP_MINUTES)]
+
+
+class _CoachV1(_Strict):
+    """Solo texto para mostrar: el registro y las propuestas al Jefe los decide el código."""
+
+    mensaje: Annotated[str, StringConstraints(min_length=1, max_length=MAX_COACH_MESSAGE_CHARS)]
+    micro_paso: _MicroStepV1 | None
 
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -144,6 +159,12 @@ def _to_plan(parsed: _PlanV1) -> PlanDraft:
     return PlanDraft(tuple(blocks), parsed.justificacion)
 
 
+def _to_coach(parsed: _CoachV1) -> CoachDraft:
+    step = parsed.micro_paso
+    micro = MicroStep(step.accion, step.minutos) if step is not None else None
+    return CoachDraft(parsed.mensaje, micro)
+
+
 SCHEMAS: Mapping[str, OutputSchema[Any]] = MappingProxyType(
     {
         "captura_v1": PydanticOutputSchema(
@@ -151,5 +172,6 @@ SCHEMAS: Mapping[str, OutputSchema[Any]] = MappingProxyType(
         ),
         "checkin_v1": PydanticOutputSchema("checkin_v1", _CheckinV1, _to_checkin),
         "plan_v1": PydanticOutputSchema("plan_v1", _PlanV1, _to_plan),
+        "coach_v1": PydanticOutputSchema("coach_v1", _CoachV1, _to_coach),
     }
 )
