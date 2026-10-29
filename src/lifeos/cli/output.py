@@ -95,6 +95,11 @@ def briefing(day: Briefing) -> list[str]:
     if protected:
         lines.append("Tiempo protegido: " + ", ".join(_block(b, zone) for b in protected))
     lines.append(f"Check-ins: {day.checkins}")
+    if day.rejected_adjustments:
+        lines.append(
+            f"Aviso: {day.rejected_adjustments} línea(s) 'ajuste:' no siguen el formato y el Jefe "
+            "no las verá (ADR-0011)."
+        )
     if day.adjustments:
         lines.append(
             f"Propuestas para el Jefe: {len(day.adjustments)} → revísalas con "
@@ -115,6 +120,10 @@ def checkin(result: CheckInOutcome) -> list[str]:
         )
     if result.capture is not None:
         lines.append(f"Captura guardada en {result.capture}")
+    if not result.readable:
+        lines.append(
+            "Aviso: la nota de hoy no sigue el formato del plan; no se usaron sus bloques."
+        )
     if result.ai_fallback:
         lines.append("(El modelo no respondió bien; se usó la respuesta sin IA.)")
     lines.append(f"Registrado en {result.path}")

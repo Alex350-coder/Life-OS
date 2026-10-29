@@ -14,7 +14,7 @@ import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC
 from pathlib import Path
-from typing import Any, NoReturn, TextIO
+from typing import NoReturn, TextIO
 
 from lifeos.application.capture import capture
 from lifeos.application.closing import DailyClosing
@@ -104,7 +104,7 @@ def _month(text: str) -> tuple[int, int]:
     return int(match[1]), int(match[2])
 
 
-def _daily_commands(commands: Any) -> None:
+def _daily_commands(commands: "argparse._SubParsersAction[_Parser]") -> None:
     commands.add_parser("hoy", help="briefing del día: bloque actual, siguiente y check-ins")
     checkin = commands.add_parser("checkin", help="registrar cómo vas (el Coach responde)")
     checkin.add_argument("texto", nargs="*", help="nota libre (se guarda como dato)")
@@ -220,10 +220,20 @@ def _checkin(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]
     return EXIT_OK, output.checkin(result)
 
 
+def _unique[V](pairs: Sequence[tuple[TaskId, V]], option: str) -> dict[TaskId, V]:
+    """`ID=valor` sin repetir: un segundo valor para el mismo ID no pisa al primero."""
+    values: dict[TaskId, V] = {}
+    for task, value in pairs:
+        if task in values:
+            raise ValidationError("cierre", str(task), f"{option} repetido para la misma tarea")
+        values[task] = value
+    return values
+
+
 def _answers(args: argparse.Namespace) -> list[ClosingAnswer]:
     answers = [ClosingAnswer(task, AnswerKind.HECHA) for task in args.hecho]
-    progress = dict(args.avance)
-    remaining = dict(args.restante)
+    progress = _unique(args.avance, "--avance")
+    remaining = _unique(args.restante, "--restante")
     for task in dict.fromkeys([*progress, *remaining]):
         answers.append(
             ClosingAnswer(task, AnswerKind.PARCIAL, progress.get(task), remaining.get(task))
@@ -278,9 +288,13 @@ def _runtime(
     return build_runtime(settings, with_llm=with_llm, clock=clock)
 
 
+_HIDDEN = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
+
+
 def _printable(line: str) -> str:
-    """Sin caracteres de control: un título de la bóveda no puede manipular la terminal."""
-    return "".join(ch for ch in line if unicodedata.category(ch) != "Cc")
+    """Sin caracteres de control, de formato (bidi) ni separadores de línea: un título de la
+    bóveda o un texto del modelo no puede manipular la terminal ni disfrazar lo que muestra."""
+    return "".join(ch for ch in line if unicodedata.category(ch) not in _HIDDEN)
 
 
 def _utf8(stream: TextIO) -> TextIO:
@@ -306,16 +320,22 @@ def main(
         runtime = _runtime(args, environ, project_root, clock)
         code, lines = COMMANDS[args.command](runtime, args)
     except UsageError as error:
-        print(f"Error de uso: {error}", file=stderr)
+        print(f"Error de uso: {_printable(str(error))}", file=stderr)
         return EXIT_USAGE
     except CONFIG_ERRORS as error:
         print(f"Error de configuración: {_printable(str(error))}", file=stderr)
         return EXIT_USAGE
     except AuditIncompleteError as error:
-        print(f"Aviso: la escritura SÍ se hizo, pero no quedó auditada: {error}", file=stderr)
+        print(
+            f"Aviso: la escritura SÍ se hizo, pero no quedó auditada: {_printable(str(error))}",
+            file=stderr,
+        )
         return EXIT_REFUSED
     except LlmError as error:
-        print(f"Error del modelo: {error}. Puedes repetir la orden sin --ia.", file=stderr)
+        print(
+            f"Error del modelo: {_printable(str(error))}. Puedes repetir la orden sin --ia.",
+            file=stderr,
+        )
         return EXIT_REFUSED
     except LifeOSError as error:
         print(f"Error: {_printable(str(error))}", file=stderr)

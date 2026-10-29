@@ -12,7 +12,7 @@ from dataclasses import dataclass
 from functools import partial
 
 from lifeos.application.capture import INBOX, capture
-from lifeos.application.checkin import append_checkin
+from lifeos.application.checkin import append_to_section
 from lifeos.application.permissions import PUBLISH_TOOL, TOOL_WRITE_MODES, EffectivePermissions
 from lifeos.application.plan_publication import (
     NoteWrite,
@@ -24,7 +24,7 @@ from lifeos.application.plan_publication import (
 )
 from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.application.tasks import LocatedTask, TaskQuery, query_tasks
-from lifeos.domain.checkin import CheckInEntry
+from lifeos.domain.checkin import CHECKIN_HEADING, CHECKIN_SECTION, CheckInEntry
 from lifeos.domain.errors import LifeOSError
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import WriteMode
@@ -153,11 +153,20 @@ class ToolRegistry:
             actor, tool, str(INBOX), lambda: capture(vault, texto, now=now, source=actor.agent_id)
         )
 
-    def anexar_checkin(self, actor: ActorContext, path: str, entry: CheckInEntry) -> VaultPath:
+    def anexar_checkin(
+        self, actor: ActorContext, path: str, entry: CheckInEntry, *more: CheckInEntry
+    ) -> VaultPath:
+        """Anexa una o varias entradas seguidas en `## Check-ins` con una sola escritura."""
         tool = "anexar_checkin"
         target = self._parse(actor, tool, path)
         vault = self._scoped(actor, tool, str(target), TOOL_WRITE_MODES[tool])
-        return self._write(actor, tool, str(target), lambda: append_checkin(vault, target, entry))
+        entries = (entry, *more)
+        return self._write(
+            actor,
+            tool,
+            str(target),
+            lambda: append_to_section(vault, target, CHECKIN_SECTION, CHECKIN_HEADING, entries),
+        )
 
     def publicar_plan(
         self, actor: ActorContext, publication: PlanPublication

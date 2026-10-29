@@ -26,6 +26,7 @@ from lifeos.application.tasks import ApplicationError, TaskQuery
 from lifeos.application.tools import ActorContext, ToolRegistry
 from lifeos.domain.adjustments import Adjustment, adjustment_entry, parse_adjustments, pending
 from lifeos.domain.capacity import local_datetime
+from lifeos.domain.errors import ValidationError
 from lifeos.domain.heuristic import propose, unplanned_after
 from lifeos.domain.horario_note import HORARIO_NOTE, parse_horario
 from lifeos.domain.plan import (
@@ -167,10 +168,18 @@ class JefePlanner:
         """Plan original y revisiones existentes, en orden (se detiene en la primera que falta)."""
         versions: list[_Version] = []
         paths = [weekly_path(week)] + [revision_path(week, n) for n in range(1, MAX_REVISIONS + 1)]
+        missing: str | None = None
         for path in paths:
             snapshot = self._snapshot(actor, path)
             if snapshot is None:
-                break
+                missing = missing or path
+                continue
+            if missing is not None:
+                # Una revisión tras un hueco no se puede ordenar: no se adivina cuál vale.
+                raise ApplicationError(
+                    f"falta {missing} pero existe {path}: restaura la nota que falta o archiva "
+                    "las posteriores antes de seguir"
+                )
             versions.append(_Version(path, snapshot, _note(snapshot)))
         return versions
 
@@ -182,7 +191,10 @@ class JefePlanner:
                 text = self._tools.leer_nota(actor, daily_path(day))
             except NoteNotFoundError:
                 continue
-            found += parse_adjustments(text, day)
+            try:
+                found += parse_adjustments(text, day)
+            except ValidationError as error:
+                raise ApplicationError(f"{daily_path(day)}: {error.reason}") from error
         return tuple(found)
 
     # --- Propuesta ------------------------------------------------------------------------
@@ -273,19 +285,19 @@ class JefePlanner:
     ) -> _Revision:
         history = split_history(base.blocks, cutoff)
         floor = planning_floor(history, max(cutoff, now))
-        adjustments = pending(
-            self._adjustments(actor, week),
-            zone=schedule.zone,
-            after=base.cutoff,
-            until=cutoff,
+        everything = pending(
+            self._adjustments(actor, week), zone=schedule.zone, after=None, until=cutoff
         )
+        # Se aplican todas las propuestas de la semana (un "reducir carga hoy" sigue valiendo en
+        # una segunda revisión del mismo día); la nota lista solo las nuevas desde la anterior.
+        new = pending(everything, zone=schedule.zone, after=base.cutoff, until=cutoff)
         context = adjust_context(
             self._context(actor, schedule, week, floor),
             schedule,
             history=history,
-            adjustments=adjustments,
+            adjustments=everything,
         )
-        return _Revision(history, adjustments, context)
+        return _Revision(history, new, context)
 
     def replanificar(
         self, week: IsoWeek | None = None, *, origin: PlanOrigin = PlanOrigin.HEURISTICA

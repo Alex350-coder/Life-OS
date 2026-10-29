@@ -72,6 +72,7 @@ class CoachDecision:
     micro_step: MicroStep | None = None
     adjustment: Adjustment | None = None
     block: Block | None = None
+    note: str = ""  # nota del usuario ya saneada (una línea), tal como se registró
 
 
 # --- Bloques del día --------------------------------------------------------------------------
@@ -163,14 +164,16 @@ def _single_line(note: str) -> str:
     return " ".join(note.split())
 
 
-def _record(state: CheckInState, task_id: TaskId | None, note: str, at: time) -> CheckInEntry:
+def _record(
+    state: CheckInState, task_id: TaskId | None, text: str, at: time
+) -> tuple[CheckInEntry, str]:
     head = f"estado: {state.value}" + (f" · {task_id}" if task_id is not None else "")
-    text = _single_line(note)
+    cut = ""
     if text:
-        room = MAX_CHECKIN_CHARS - len(head) - len(" · ") - len(NOTE_PREFIX)
+        room = max(2, MAX_CHECKIN_CHARS - len(head) - len(" · ") - len(NOTE_PREFIX))
         cut = text if len(text) <= room else text[: room - 1] + "…"
         head = f"{head} · {NOTE_PREFIX}{cut}"
-    return CheckInEntry(at, head)
+    return CheckInEntry(at, head), cut
 
 
 def _resting(state: CheckInState, rest: Block) -> str:
@@ -256,7 +259,9 @@ def decide(
         block = current_block(blocks, now)
     if task_id is None and state is CheckInState.PERDIDO and block is not None:
         task_id = block.task_id  # el registro dice qué bloque se dio por perdido
-    record = _record(state, task_id, note, time(local.hour, local.minute))
+    record, recorded_note = _record(
+        state, task_id, _single_line(note), time(local.hour, local.minute)
+    )
     reply = _reply(state, block, now, zone, in_protected(blocks, now))
     return CoachDecision(
         kind=reply.kind,
@@ -265,4 +270,5 @@ def decide(
         micro_step=reply.micro_step,
         adjustment=reply.adjustment,
         block=block,
+        note=recorded_note,
     )

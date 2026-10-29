@@ -36,6 +36,7 @@ from lifeos.domain.horario_note import HORARIO_NOTE
 from lifeos.domain.ids import TaskId
 from lifeos.domain.plan import Block, BlockKind
 from lifeos.domain.plan_note import CLOSING_HEADING, PlanNoteError, daily_path, parse_daily_blocks
+from lifeos.domain.sections import section_lines
 from lifeos.ports.clock import Clock
 from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult, LogWriteError
 from lifeos.ports.vault import NoteNotFoundError, VaultPath, VaultStore
@@ -51,7 +52,7 @@ class ClosingIncompleteError(ApplicationError):
         names = ", ".join(written)
         super().__init__(
             f"cierre incompleto: se aplicó {names} y luego falló ({type(cause).__name__}); "
-            "revisa la nota y repite solo lo que falte"
+            "revisa la nota y completa a mano lo que falte"
         )
         self.written = written
 
@@ -64,6 +65,7 @@ class ClosingPreview:
     unanswered: tuple[TaskId, ...]
     missed: tuple[Block, ...]  # bloques de las tareas "no realizadas": se proponen al Jefe
     zone: ZoneInfo
+    closed: bool = False  # el día ya tiene un cierre registrado
 
 
 @dataclass(frozen=True, slots=True)
@@ -79,6 +81,7 @@ class _Today:
     path: VaultPath
     work: tuple[Block, ...]
     zone: ZoneInfo
+    closed: bool  # `## Cierre` ya tiene entradas
 
 
 class DailyClosing:
@@ -120,7 +123,8 @@ class DailyClosing:
                 f"la nota de hoy no sigue el formato del plan: {error}"
             ) from error
         work = tuple(b for b in blocks if b.kind is BlockKind.TRABAJO)
-        return _Today(day, path, work, zone)
+        closed = bool((section_lines(text, CLOSING_SECTION) or ())[1:])
+        return _Today(day, path, work, zone, closed)
 
     def _change(self, answer: ClosingAnswer) -> TaskChange:
         located = find_task(self._vault, answer.task_id)
@@ -146,13 +150,20 @@ class DailyClosing:
                 raise ApplicationError(f"{answer.task_id} no está en el plan de hoy ({today.day})")
         answered = {answer.task_id for answer in answers}
         not_done = {a.task_id for a in answers if a.kind is AnswerKind.NO}
+        now = self._clock.now().timestamp()
         return ClosingPreview(
             day=today.day,
             path=today.path,
             changes=tuple(self._change(answer) for answer in answers),
             unanswered=tuple(task_id for task_id in planned if task_id not in answered),
-            missed=tuple(b for b in today.work if b.task_id in not_done),
+            # Solo los bloques que ya empezaron: lo que aún no llegó no está perdido.
+            missed=tuple(
+                b
+                for b in today.work
+                if b.task_id in not_done and b.interval.start.timestamp() <= now
+            ),
             zone=today.zone,
+            closed=today.closed,
         )
 
     # --- Aplicación -------------------------------------------------------------------------
@@ -170,20 +181,35 @@ class DailyClosing:
         )
 
     def _audited(
-        self, correlation: str, action: str, target: str, operation: Callable[[], object]
+        self,
+        correlation: str,
+        action: str,
+        target: str,
+        operation: Callable[[], object],
+        written: list[str],
     ) -> None:
+        """Ejecuta y audita; lo escrito se anota antes del `ok` por si la auditoría falla."""
         self._log(correlation, action, target, AuditResult.INTENTO)
         try:
             operation()
-        except Exception:
-            self._log(correlation, action, target, AuditResult.ERROR)
+        except Exception as error:
+            try:
+                self._log(correlation, action, target, AuditResult.ERROR)
+            except LogWriteError as log_error:
+                raise error from log_error
             raise
+        written.append(target)
         self._log(correlation, action, target, AuditResult.OK)
 
     def apply(self, answers: Sequence[ClosingAnswer]) -> ClosingResult:
         if not answers:
             raise ApplicationError("indica al menos una respuesta (--hecho, --avance, --no…)")
         preview = self.preview(answers)
+        if preview.closed:
+            raise ApplicationError(
+                f"el cierre de {preview.day} ya está registrado en {preview.path}: corrige a mano "
+                "lo que falte (no se repite para no duplicar cambios ni propuestas)"
+            )
         correlation = uuid.uuid4().hex
         local = self._clock.now().astimezone(preview.zone)
         at = time(local.hour, local.minute)
@@ -200,8 +226,8 @@ class DailyClosing:
                     partial(
                         update_task, self._vault, answer.task_id, checkbox=checkbox, fields=fields
                     ),
+                    written,
                 )
-                written.append(str(answer.task_id))
             entries = summary_entries(preview.changes, preview.unanswered, at)
             self._audited(
                 correlation,
@@ -210,10 +236,10 @@ class DailyClosing:
                 lambda: append_to_section(
                     self._vault, preview.path, CLOSING_SECTION, CLOSING_HEADING, entries
                 ),
+                written,
             )
-            written.append(str(preview.path))
             adjustments = self._coach.record_missed(preview.day, preview.missed)
-        except (LifeOSError, LogWriteError) as error:
+        except (LifeOSError, OSError) as error:
             if not written:
                 raise
             raise ClosingIncompleteError(tuple(written), error) from error

@@ -136,15 +136,16 @@ def test_non_finite_or_negative_costs_are_malformed(tmp_path: Path, cost: str) -
 
 
 @pytest.mark.usefixtures("seeded")
-def test_repeating_the_closing_does_not_duplicate_relocation_proposals(
+def test_closing_does_not_repeat_a_proposal_already_made_in_a_checkin(
     vault: FilesystemVault,
 ) -> None:
-    for minute in ("21:00", "21:05"):
-        clock = FakeClock(at(MON, minute))
-        audit = MemoryAuditLog()
-        tools = ToolRegistry(vault, samples.effective(), audit, clock)
-        closing = DailyClosing(vault, CoachSession(tools, clock), clock, audit)
-        closing.apply((ClosingAnswer(tid("t-cccccc"), AnswerKind.NO),))
+    clock = FakeClock(at(MON, "17:05"))
+    audit = MemoryAuditLog()
+    tools = ToolRegistry(vault, samples.effective(), audit, clock)
+    coach = CoachSession(tools, clock)
+    coach.checkin("", state=CheckInState.PERDIDO, task_id=tid("t-cccccc"))
+    clock.current = at(MON, "21:00")
+    DailyClosing(vault, coach, clock, audit).apply((ClosingAnswer(tid("t-cccccc"), AnswerKind.NO),))
     assert len(parse_adjustments(vault.read(MONDAY).text, MON)) == 1
 
 

@@ -152,6 +152,7 @@ _OPTIONAL_INT_FIELDS = ("tokens_prompt", "tokens_completion", "http_status")
 _TEXT_FIELDS = ("correlation_id", "provider", "model", "profile", "agent", "ritual")
 _UTC_SUFFIX = "Z"
 MONTHS_PER_YEAR = 12
+MAX_COST_USD = Decimal(1_000_000)  # más que esto en un intento es un registro dañado
 
 
 def _is_int(value: object) -> bool:
@@ -178,6 +179,8 @@ def _usage_record(data: object) -> UsageRecord:
         amount = Decimal(cost) if cost is not None else None
     except ArithmeticError:
         raise ValueError("costo no decimal") from None
+    if amount is not None and (not amount.is_finite() or amount < 0 or amount > MAX_COST_USD):
+        raise ValueError("costo fuera de rango")
     return UsageRecord(
         ts=datetime.fromisoformat(stamp.removesuffix(_UTC_SUFFIX)).replace(tzinfo=UTC),
         correlation_id=data["correlation_id"],
@@ -220,6 +223,6 @@ class JsonlUsageReader:
                 continue
             try:
                 records.append(_usage_record(json.loads(line)))
-            except (ValueError, TypeError, RecursionError):
+            except (ValueError, TypeError, RecursionError, ArithmeticError):
                 malformed += 1
         return UsageScan(tuple(records), malformed, 1)

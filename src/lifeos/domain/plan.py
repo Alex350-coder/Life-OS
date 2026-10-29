@@ -4,6 +4,7 @@ Los compromisos fijos y el tiempo protegido salen del horario, nunca de una prop
 validador exige que el plan los contenga exactamente.
 """
 
+import unicodedata
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from datetime import date, datetime, timedelta
@@ -21,15 +22,24 @@ from lifeos.domain.weeks import IsoWeek
 # Estados con trabajo pendiente que el Jefe puede programar (RULES §D3).
 PLANNABLE = frozenset({TaskStatus.PROPUESTA, TaskStatus.PROGRAMADA, TaskStatus.CONFIRMADA})
 MAX_TITLE_CHARS = 200
+# Caracteres que no se ven pero alteran la terminal o el orden del texto (ESC, bidi…).
+_INVISIBLE = frozenset({"Cc", "Cf", "Cs", "Co", "Cn"})
+_SEPARATORS = frozenset({"Zl", "Zp"})
 
 
 def clean(text: str, limit: int = MAX_TITLE_CHARS) -> str:
-    """Una sola línea, sin corchetes y con longitud acotada: el texto queda inerte (SEC-10).
+    """Una sola línea, sin corchetes, sin caracteres invisibles y con longitud acotada: el
+    texto queda inerte (SEC-10).
 
     Los títulos de los bloques se normalizan al construirlos, de modo que el plan en memoria,
     la nota escrita y el plan releído al aprobar son idénticos.
     """
-    single = " ".join(text.replace("[", "(").replace("]", ")").split())
+    visible = "".join(
+        " " if unicodedata.category(ch) in _SEPARATORS else ch
+        for ch in text
+        if unicodedata.category(ch) not in _INVISIBLE
+    )
+    single = " ".join(visible.replace("[", "(").replace("]", ")").split())
     return single if len(single) <= limit else single[: limit - 1] + "…"
 
 

@@ -104,6 +104,24 @@ def parse_adjustments(text: str, day: date) -> tuple[Adjustment, ...]:
     return tuple(found.values())
 
 
+_MARKER_LINE_RE = re.compile(rf"- [0-9]{{2}}:[0-9]{{2}} — {MARKER}")
+
+
+def rejected_count(text: str) -> int:
+    """Líneas de `## Check-ins` que parecen propuestas pero no siguen el formato exacto."""
+    lines = section_lines(text, CHECKIN_SECTION) or ()
+    return sum(
+        1
+        for line in lines[1:]
+        if _MARKER_LINE_RE.match(line.lstrip()) and _parse(line, date.min) is None
+    )
+
+
+def same_proposal(first: Adjustment, second: Adjustment) -> bool:
+    """La misma propuesta aunque se registrara a otra hora (día, tipo, horario y tarea)."""
+    return _key(first)[0] == _key(second)[0] and _key(first)[2:] == _key(second)[2:]
+
+
 def pending(
     adjustments: Iterable[Adjustment],
     *,
@@ -112,9 +130,8 @@ def pending(
     until: datetime,
 ) -> tuple[Adjustment, ...]:
     """Propuestas registradas en (`after`, `until`]: las que aún no atendió ninguna revisión."""
-    chosen = []
-    for adjustment in adjustments:
-        moment = adjustment.moment(zone)
-        if (after is None or moment > after) and moment <= until:
-            chosen.append(adjustment)
-    return tuple(chosen)
+    return tuple(
+        adjustment
+        for adjustment in adjustments
+        if (after is None or adjustment.moment(zone) > after) and adjustment.moment(zone) <= until
+    )

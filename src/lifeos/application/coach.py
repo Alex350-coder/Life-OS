@@ -20,6 +20,8 @@ from lifeos.domain.adjustments import (
     AdjustmentKind,
     adjustment_entry,
     parse_adjustments,
+    rejected_count,
+    same_proposal,
 )
 from lifeos.domain.checkin import CHECKIN_SECTION
 from lifeos.domain.coach import (
@@ -36,15 +38,19 @@ from lifeos.domain.coach import (
 from lifeos.domain.horario_note import HORARIO_NOTE, parse_horario
 from lifeos.domain.ids import TaskId
 from lifeos.domain.plan import Block, BlockKind
-from lifeos.domain.plan_note import PlanNoteError, daily_path, parse_daily_blocks
+from lifeos.domain.plan_note import PlanNoteError, daily_path, is_approved, parse_daily_blocks
 from lifeos.domain.proposals import CoachDraft
 from lifeos.domain.sections import section_lines
 from lifeos.ports.clock import Clock
 from lifeos.ports.llm import LlmError
+from lifeos.ports.logs import LogWriteError
 from lifeos.ports.vault import NoteNotFoundError, VaultPath
 
 COACH_ID = "coach"
-_APPROVED = "estado_plan: aprobado"
+# Respuestas cuyo mensaje del código (registro, escalado, descanso) se muestra siempre.
+_STATUS_KINDS = frozenset(
+    {ReplyKind.REPLANIFICAR, ReplyKind.ALIVIO, ReplyKind.REGISTRO, ReplyKind.DESCANSO}
+)
 
 
 class NoDailyPlanError(ApplicationError):
@@ -69,6 +75,7 @@ class Briefing:
     adjustments: tuple[Adjustment, ...]
     zone: ZoneInfo
     readable: bool = True  # False si la nota diaria no sigue el formato del plan
+    rejected_adjustments: int = 0  # líneas "ajuste:" que no siguen el formato exacto
 
     @property
     def work(self) -> tuple[Block, ...]:
@@ -84,6 +91,7 @@ class CheckInOutcome:
     path: VaultPath
     capture: VaultPath | None
     ai_fallback: bool = False
+    readable: bool = True  # False: la nota de hoy no sigue el formato y no se usaron sus bloques
 
 
 @dataclass(frozen=True, slots=True)
@@ -169,7 +177,7 @@ class CoachSession:
         now = self._clock.now()
         return Briefing(
             day=today.day,
-            approved=any(line.strip() == _APPROVED for line in today.text.splitlines()[:8]),
+            approved=is_approved(today.text),
             blocks=blocks,
             current=current_block(blocks, now),
             upcoming=next_block(blocks, now),
@@ -178,6 +186,7 @@ class CoachSession:
             adjustments=parse_adjustments(today.text, today.day),
             zone=today.zone,
             readable=readable,
+            rejected_adjustments=rejected_count(today.text),
         )
 
     # --- Check-in ---------------------------------------------------------------------------
@@ -195,7 +204,7 @@ class CoachSession:
             raise ApplicationError("el Coach con IA no está configurado (falta la pasarela)")
         actor = self.new_actor()
         today = self._today(actor, None)
-        blocks, _ = self._blocks(today)
+        blocks, readable = self._blocks(today)
         decision = decide(
             state,
             now=self._clock.now(),
@@ -204,9 +213,9 @@ class CoachSession:
             task_id=task_id,
             note=note,
         )
-        path = self._tools.anexar_checkin(actor, today.path, decision.record)
-        if decision.adjustment is not None:
-            self._tools.anexar_checkin(actor, today.path, adjustment_entry(decision.adjustment))
+        # Registro y propuesta en una sola escritura: o quedan los dos o ninguno.
+        extra = (adjustment_entry(decision.adjustment),) if decision.adjustment else ()
+        path = self._tools.anexar_checkin(actor, today.path, decision.record, *extra)
         captured = self._tools.crear_captura(actor, capture) if capture else None
         message, step, fallback = self._message(decision, actor, use_ai)
         return CheckInOutcome(
@@ -217,6 +226,7 @@ class CoachSession:
             path=path,
             capture=captured,
             ai_fallback=fallback,
+            readable=readable,
         )
 
     def _message(
@@ -226,11 +236,15 @@ class CoachSession:
             return decision.message, decision.micro_step, False
         try:
             draft = self._writer.write(decision, correlation_id=actor.correlation_id)
-        except LlmError:
-            # El fallo ya quedó en el registro de uso; el check-in no depende del modelo.
+        except (LlmError, LogWriteError, ApplicationError):
+            # El check-in ya está escrito: cualquier fallo del modelo o de su registro de uso
+            # se resuelve con la respuesta determinista, nunca con un error que invite a repetir.
             return decision.message, decision.micro_step, True
         # El modelo no puede añadir un micro-paso que las reglas no pidieron.
         step = (draft.micro_step or decision.micro_step) if decision.micro_step else None
+        if decision.kind in _STATUS_KINDS:
+            # Lo que el código registró y escaló se dice siempre, diga lo que diga el modelo.
+            return f"{draft.message} {decision.message}", step, False
         return draft.message, step, False
 
     # --- Cierre -----------------------------------------------------------------------------
@@ -241,7 +255,8 @@ class CoachSession:
         today = self._today(actor, day)
         now = self._clock.now().astimezone(today.zone)
         at = now.time().replace(second=0, microsecond=0)
-        recorded = []
+        existing = parse_adjustments(today.text, day)
+        recorded: list[Adjustment] = []
         for block in blocks:
             if block.task_id is None:
                 continue
@@ -252,6 +267,10 @@ class CoachSession:
                 block_span(block, today.zone),
                 block.task_id,
             )
-            self._tools.anexar_checkin(actor, today.path, adjustment_entry(adjustment))
-            recorded.append(adjustment)
+            # Una propuesta ya registrada (p. ej., desde un check-in) no se repite.
+            if not any(same_proposal(adjustment, old) for old in (*existing, *recorded)):
+                recorded.append(adjustment)
+        if recorded:
+            first, *rest = (adjustment_entry(a) for a in recorded)
+            self._tools.anexar_checkin(actor, today.path, first, *rest)
         return tuple(recorded)

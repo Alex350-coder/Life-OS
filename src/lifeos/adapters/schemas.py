@@ -73,7 +73,7 @@ class _CoachV1(_Strict):
     """Solo texto para mostrar: el registro y las propuestas al Jefe los decide el código."""
 
     mensaje: Annotated[str, StringConstraints(min_length=1, max_length=MAX_COACH_MESSAGE_CHARS)]
-    micro_paso: _MicroStepV1 | None
+    micro_paso: _MicroStepV1 | None = None
 
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:

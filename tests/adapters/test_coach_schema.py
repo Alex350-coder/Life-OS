@@ -27,7 +27,6 @@ def test_message_without_micro_step() -> None:
 @pytest.mark.parametrize(
     "raw",
     [
-        '{"mensaje": "x"}',
         '{"mensaje": "", "micro_paso": null}',
         '{"mensaje": "x", "micro_paso": {"accion": "a", "minutos": 0}}',
         '{"mensaje": "x", "micro_paso": {"accion": "a", "minutos": 11}}',

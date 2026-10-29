@@ -6,7 +6,7 @@ tokens y costo. Los tokens y costos desconocidos se cuentan aparte y nunca se su
 
 from collections import defaultdict
 from collections.abc import Iterable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from decimal import Decimal
 
 from lifeos.domain.plan import clean
@@ -66,9 +66,11 @@ def summarize(scan: UsageScan) -> UsageSummary:
     for record in scan.records:
         groups[(_name(record.agent), _name(record.ritual))].append(record)
     rows = tuple(_row(agent, ritual, groups[(agent, ritual)]) for agent, ritual in sorted(groups))
+    every = _row(TOTAL, TOTAL, scan.records)
+    total = replace(every, calls=sum(row.calls for row in rows))  # llamadas por agente y ritual
     return UsageSummary(
         rows=rows,
-        total=_row(TOTAL, TOTAL, scan.records),
+        total=total,
         malformed=scan.malformed,
         files=scan.files,
     )
