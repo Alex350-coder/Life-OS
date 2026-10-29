@@ -16,12 +16,15 @@ from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
-from lifeos.adapters.jsonl_logs import JsonlAuditLog, JsonlUsageLog
+from lifeos.adapters.jsonl_logs import JsonlAuditLog, JsonlUsageLog, JsonlUsageReader
 from lifeos.adapters.nvidia_llm import NvidiaChatClient
 from lifeos.adapters.schemas import SCHEMAS
 from lifeos.adapters.secrets import MissingSecretError, Secret, read_dotenv, resolve_secret
 from lifeos.adapters.system_clock import SystemClock
 from lifeos.adapters.yaml_config import YamlConfigSource
+from lifeos.application.closing import DailyClosing
+from lifeos.application.coach import CoachSession
+from lifeos.application.coach_ai import AiCoachWriter
 from lifeos.application.jefe import JefePlanner
 from lifeos.application.jefe_ai import AiPlanDrafter
 from lifeos.application.llm_calls import ModelGateway
@@ -35,7 +38,7 @@ from lifeos.application.tools import ToolRegistry
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import ConfigError, ConfigRejectedError, ModelCatalog, Policy
 from lifeos.ports.llm import LlmClient
-from lifeos.ports.logs import AuditLog, UsageLog
+from lifeos.ports.logs import AuditLog, UsageLog, UsageReader
 from lifeos.ports.vault import VaultPath, VaultStore
 
 ENV_FILE = ".env"
@@ -91,6 +94,9 @@ class Runtime:
     # solo acceden mediante `tools`.
     vault: VaultStore | None
     jefe: JefePlanner | None
+    coach: CoachSession | None
+    closing: DailyClosing | None  # cierre diario del propietario (con propuestas del Coach)
+    usage_reader: UsageReader
 
 
 def _provider_secrets(settings: Settings, catalog: ModelCatalog) -> dict[str, Secret]:
@@ -138,6 +144,23 @@ def _jefe(
     return JefePlanner(tools, clock, drafter=drafter, configured_zone=settings.timezone)
 
 
+def _coach(
+    tools: ToolRegistry | None,
+    gateway: ModelGateway | None,
+    permissions: Mapping[str, EffectivePermissions],
+    clock: Clock,
+    settings: Settings,
+) -> CoachSession | None:
+    if tools is None or "coach" not in permissions:
+        return None
+    writer = (
+        AiCoachWriter(gateway, SCHEMAS["coach_v1"], profile=permissions["coach"].profile)
+        if gateway is not None
+        else None
+    )
+    return CoachSession(tools, clock, writer=writer, configured_zone=settings.timezone)
+
+
 def build_runtime(
     settings: Settings, *, with_llm: bool = False, clock: Clock | None = None
 ) -> Runtime:
@@ -163,6 +186,12 @@ def build_runtime(
     )
     vault = FilesystemVault(settings.vault_path) if settings.vault_path is not None else None
     tools = ToolRegistry(vault, permissions, audit_log, clock) if vault is not None else None
+    coach = _coach(tools, gateway, permissions, clock, settings)
+    closing = (
+        DailyClosing(vault, coach, clock, audit_log, configured_zone=settings.timezone)
+        if vault is not None and coach is not None
+        else None
+    )
     return Runtime(
         policy=policy,
         catalog=catalog,
@@ -175,4 +204,7 @@ def build_runtime(
         tools=tools,
         vault=vault,
         jefe=_jefe(tools, gateway, permissions, clock, settings),
+        coach=coach,
+        closing=closing,
+        usage_reader=JsonlUsageReader(settings.logs_dir),
     )

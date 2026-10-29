@@ -1,25 +1,36 @@
-"""CLI `lifeos` (F3-T05, ADR-0006): `capturar`, `tareas`, `semana` y `aprobar`.
+"""CLI `lifeos` (F3-T05, F4-T05, ADR-0006).
+
+Órdenes: `capturar`, `tareas`, `semana [--replanificar]`, `aprobar`, `hoy`, `checkin`, `cierre`
+y `uso`.
 
 Solo traduce argumentos y resultados; las reglas viven en los casos de uso. Códigos de salida:
 0 correcto, 1 rechazo o error del caso de uso, 2 error de uso o de configuración.
 """
 
 import argparse
+import re
 import sys
 import unicodedata
 from collections.abc import Callable, Mapping, Sequence
+from datetime import UTC
 from pathlib import Path
-from typing import NoReturn, TextIO
+from typing import Any, NoReturn, TextIO
 
 from lifeos.application.capture import capture
+from lifeos.application.closing import DailyClosing
+from lifeos.application.coach import CoachSession
 from lifeos.application.jefe import JefePlanner, PlanOutcome
 from lifeos.application.tasks import TaskQuery, query_tasks
 from lifeos.application.tools import AuditIncompleteError
+from lifeos.application.usage_report import summarize
 from lifeos.bootstrap import STARTUP_ERRORS, Runtime, Settings, build_runtime
 from lifeos.cli import output
+from lifeos.domain.closing import AnswerKind, ClosingAnswer
+from lifeos.domain.coach import CheckInState
 from lifeos.domain.errors import LifeOSError, ValidationError
+from lifeos.domain.ids import TaskId
 from lifeos.domain.plan import PlanOrigin
-from lifeos.domain.task import Area, TaskStatus
+from lifeos.domain.task import Area, Effort, Progress, TaskStatus
 from lifeos.domain.weeks import IsoWeek
 from lifeos.ports.clock import Clock
 from lifeos.ports.llm import LlmError
@@ -30,6 +41,7 @@ EXIT_REFUSED = 1
 EXIT_USAGE = 2
 CLI_SOURCE = "cli"
 DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[3]
+_MONTH_RE = re.compile(r"([0-9]{4})-(0[1-9]|1[0-2])")
 
 
 class UsageError(Exception):
@@ -55,6 +67,61 @@ def _week(text: str) -> IsoWeek:
         raise argparse.ArgumentTypeError(error.reason) from None
 
 
+def _task_id(text: str) -> TaskId:
+    try:
+        return TaskId(text.strip())
+    except ValidationError as error:
+        raise argparse.ArgumentTypeError(error.reason) from None
+
+
+def _pair(text: str) -> tuple[TaskId, str]:
+    task, sep, value = text.partition("=")
+    if not sep or not value.strip():
+        raise argparse.ArgumentTypeError("formato esperado ID=valor (p. ej., t-7f3k2m=40)")
+    return _task_id(task), value.strip()
+
+
+def _progress(text: str) -> tuple[TaskId, Progress]:
+    task, value = _pair(text)
+    try:
+        return task, Progress.parse(value if value.endswith("%") else f"{value}%")
+    except ValidationError as error:
+        raise argparse.ArgumentTypeError(error.reason) from None
+
+
+def _remaining(text: str) -> tuple[TaskId, Effort]:
+    task, value = _pair(text)
+    try:
+        return task, Effort.parse(value)
+    except ValidationError as error:
+        raise argparse.ArgumentTypeError(error.reason) from None
+
+
+def _month(text: str) -> tuple[int, int]:
+    match = _MONTH_RE.fullmatch(text.strip())
+    if match is None:
+        raise argparse.ArgumentTypeError("formato esperado AAAA-MM (mes 01 a 12)")
+    return int(match[1]), int(match[2])
+
+
+def _daily_commands(commands: Any) -> None:
+    commands.add_parser("hoy", help="briefing del día: bloque actual, siguiente y check-ins")
+    checkin = commands.add_parser("checkin", help="registrar cómo vas (el Coach responde)")
+    checkin.add_argument("texto", nargs="*", help="nota libre (se guarda como dato)")
+    checkin.add_argument("--estado", choices=[s.value for s in CheckInState], default="nota")
+    checkin.add_argument("--tarea", type=_task_id, help="id de la tarea del bloque")
+    checkin.add_argument("--capturar", help="guardar además una captura en 00-Inbox/")
+    checkin.add_argument("--ia", action="store_true", help="pedir el mensaje al modelo")
+    cierre = commands.add_parser("cierre", help="cierre del día (sin --confirmar no cambia nada)")
+    cierre.add_argument("--hecho", type=_task_id, action="append", default=[], metavar="ID")
+    cierre.add_argument("--avance", type=_progress, action="append", default=[], metavar="ID=40")
+    cierre.add_argument("--restante", type=_remaining, action="append", default=[], metavar="ID=1h")
+    cierre.add_argument("--no", type=_task_id, action="append", default=[], metavar="ID")
+    cierre.add_argument("--confirmar", action="store_true", help="aplicar los cambios")
+    uso = commands.add_parser("uso", help="resumen del uso de modelos de un mes (UTC)")
+    uso.add_argument("--mes", type=_month, help="AAAA-MM; por defecto, el mes actual")
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = _Parser(prog="lifeos", description="Life OS: planificación personal.")
     commands = parser.add_subparsers(dest="command", required=True, parser_class=_Parser)
@@ -68,8 +135,14 @@ def build_parser() -> argparse.ArgumentParser:
     semana = commands.add_parser("semana", help="proponer el plan semanal (queda propuesto)")
     semana.add_argument("--semana", type=_week, help="AAAA-Wnn; por defecto, la semana actual")
     semana.add_argument("--ia", action="store_true", help="pedir la propuesta al modelo")
+    semana.add_argument(
+        "--replanificar",
+        action="store_true",
+        help="proponer una revisión de la semana aprobada desde ahora (ADR-0011)",
+    )
     aprobar = commands.add_parser("aprobar", help="aprobar y publicar el plan propuesto")
     aprobar.add_argument("--semana", type=_week, help="AAAA-Wnn; por defecto, la semana actual")
+    _daily_commands(commands)
     return parser
 
 
@@ -110,11 +183,68 @@ def _plan(result: PlanOutcome) -> tuple[int, list[str]]:
 
 def _semana(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
     origin = PlanOrigin.IA if args.ia else PlanOrigin.HEURISTICA
-    return _plan(_jefe(runtime).proponer(args.semana, origin=origin))
+    jefe = _jefe(runtime)
+    if args.replanificar:
+        return _plan(jefe.replanificar(args.semana, origin=origin))
+    return _plan(jefe.proponer(args.semana, origin=origin))
 
 
 def _aprobar(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
     return _plan(_jefe(runtime).aprobar(args.semana))
+
+
+def _coach(runtime: Runtime) -> CoachSession:
+    if runtime.coach is None:
+        raise SetupError("no hay agente Coach configurado (config/agents/coach.yaml y la política)")
+    return runtime.coach
+
+
+def _closing(runtime: Runtime) -> DailyClosing:
+    if runtime.closing is None:
+        raise SetupError("el cierre necesita la bóveda y el agente Coach configurados")
+    return runtime.closing
+
+
+def _hoy(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
+    return EXIT_OK, output.briefing(_coach(runtime).briefing())
+
+
+def _checkin(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
+    result = _coach(runtime).checkin(
+        " ".join(args.texto),
+        state=CheckInState(args.estado),
+        task_id=args.tarea,
+        capture=args.capturar,
+        use_ai=args.ia,
+    )
+    return EXIT_OK, output.checkin(result)
+
+
+def _answers(args: argparse.Namespace) -> list[ClosingAnswer]:
+    answers = [ClosingAnswer(task, AnswerKind.HECHA) for task in args.hecho]
+    progress = dict(args.avance)
+    remaining = dict(args.restante)
+    for task in dict.fromkeys([*progress, *remaining]):
+        answers.append(
+            ClosingAnswer(task, AnswerKind.PARCIAL, progress.get(task), remaining.get(task))
+        )
+    answers += [ClosingAnswer(task, AnswerKind.NO) for task in args.no]
+    return answers
+
+
+def _cierre(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
+    closing = _closing(runtime)
+    answers = _answers(args)
+    if args.confirmar:
+        return EXIT_OK, output.closing_result(closing.apply(answers))
+    return EXIT_OK, output.closing_preview(closing.preview(answers))
+
+
+def _uso(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
+    now = runtime.clock.now().astimezone(UTC)
+    year, month = args.mes or (now.year, now.month)
+    summary = summarize(runtime.usage_reader.read_month(year, month))
+    return EXIT_OK, output.usage(summary, f"{year:04d}-{month:02d}")
 
 
 Command = Callable[[Runtime, argparse.Namespace], tuple[int, list[str]]]
@@ -123,7 +253,13 @@ COMMANDS: Mapping[str, Command] = {
     "tareas": _tareas,
     "semana": _semana,
     "aprobar": _aprobar,
+    "hoy": _hoy,
+    "checkin": _checkin,
+    "cierre": _cierre,
+    "uso": _uso,
 }
+# Órdenes que no tocan la bóveda.
+WITHOUT_VAULT = frozenset({"uso"})
 
 
 # --- Entrada ----------------------------------------------------------------------------------
@@ -136,9 +272,9 @@ def _runtime(
     clock: Clock | None,
 ) -> Runtime:
     settings = Settings.from_env(project_root, environ)
-    if settings.vault_path is None:
+    if settings.vault_path is None and args.command not in WITHOUT_VAULT:
         raise SetupError("falta LIFEOS_VAULT_PATH (ruta a tu bóveda) en el entorno o en .env")
-    with_llm = args.command == "semana" and args.ia
+    with_llm = args.command in {"semana", "checkin"} and args.ia
     return build_runtime(settings, with_llm=with_llm, clock=clock)
 
 
@@ -179,7 +315,7 @@ def main(
         print(f"Aviso: la escritura SÍ se hizo, pero no quedó auditada: {error}", file=stderr)
         return EXIT_REFUSED
     except LlmError as error:
-        print(f"Error del modelo: {error}. Puedes proponer sin --ia (heurística).", file=stderr)
+        print(f"Error del modelo: {error}. Puedes repetir la orden sin --ia.", file=stderr)
         return EXIT_REFUSED
     except LifeOSError as error:
         print(f"Error: {_printable(str(error))}", file=stderr)

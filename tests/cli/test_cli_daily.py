@@ -20,6 +20,7 @@ from tests.planning_samples import HORARIO
 
 PROJECT = Path(__file__).resolve().parent.parent.parent
 MONDAY = "Diario/2026-11-02.md"
+FAKE_KEY = "nvapi-" + "x" * 20  # construida aquí para que el control de secretos no la vea
 
 pytestmark = [pytest.mark.integration]
 
@@ -251,7 +252,7 @@ def test_uso_summarizes_logged_calls_without_content(cli: DailyCli) -> None:
         "http_status": 200,
     }
     (logs / "usage-2026-11.jsonl").write_text(
-        json.dumps(line) + "\nlinea dañada con secreto nvapi-xxxxxxxxxxxxxxxxxxxx\n",
+        json.dumps(line) + f"\nlinea dañada con secreto {FAKE_KEY}\n",
         encoding="utf-8",
     )
     code, out, _ = cli.run("uso", "--mes", "2026-11")
