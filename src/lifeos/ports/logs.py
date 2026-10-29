@@ -87,3 +87,18 @@ class UsageLog(Protocol):
 
 class AuditLog(Protocol):
     def append(self, record: AuditRecord) -> None: ...
+
+
+@dataclass(frozen=True, slots=True)
+class UsageScan:
+    """Registros de uso de un mes. `malformed` cuenta las líneas que no se pudieron leer."""
+
+    records: tuple[UsageRecord, ...]
+    malformed: int
+    files: int
+
+
+class UsageReader(Protocol):
+    """Lectura del registro de uso (solo lectura; `lifeos uso`)."""
+
+    def read_month(self, year: int, month: int) -> UsageScan: ...

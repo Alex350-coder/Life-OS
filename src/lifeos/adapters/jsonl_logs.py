@@ -15,7 +15,14 @@ from decimal import Decimal
 from enum import Enum
 from pathlib import Path
 
-from lifeos.ports.logs import AuditRecord, LogWriteError, UsageRecord
+from lifeos.ports.logs import (
+    AuditRecord,
+    CostStatus,
+    LogWriteError,
+    UsageOutcome,
+    UsageRecord,
+    UsageScan,
+)
 
 RETENTION_DAYS = 90
 _LOG_NAME_RE = re.compile(r"^(usage|audit)-(\d{4})-(0[1-9]|1[0-2])\.jsonl$")
@@ -137,3 +144,82 @@ def purge_logs(
             except OSError as error:
                 raise LogWriteError(f"no se pudo purgar {path.name}: {error.strerror}") from None
     return selected
+
+
+_USAGE_FIELDS = frozenset(f.name for f in dataclasses.fields(UsageRecord))
+_INT_FIELDS = ("attempt", "latency_ms")
+_OPTIONAL_INT_FIELDS = ("tokens_prompt", "tokens_completion", "http_status")
+_TEXT_FIELDS = ("correlation_id", "provider", "model", "profile", "agent", "ritual")
+_UTC_SUFFIX = "Z"
+MONTHS_PER_YEAR = 12
+
+
+def _is_int(value: object) -> bool:
+    return isinstance(value, int) and not isinstance(value, bool)
+
+
+def _usage_record(data: object) -> UsageRecord:
+    """Registro tipado desde una línea JSON; cualquier desviación es `ValueError`."""
+    if not isinstance(data, dict) or set(data) != _USAGE_FIELDS:
+        raise ValueError("campos inesperados")
+    if not all(isinstance(data[name], str) for name in (*_TEXT_FIELDS, "ts")):
+        raise ValueError("texto esperado")
+    if not all(_is_int(data[name]) for name in _INT_FIELDS):
+        raise ValueError("entero esperado")
+    if not all(data[name] is None or _is_int(data[name]) for name in _OPTIONAL_INT_FIELDS):
+        raise ValueError("entero o null esperado")
+    stamp = data["ts"]
+    if not stamp.endswith(_UTC_SUFFIX):
+        raise ValueError("la hora debe estar en UTC")
+    cost = data["cost_usd"]
+    if cost is not None and not isinstance(cost, str):
+        raise ValueError("costo como texto decimal")
+    try:
+        amount = Decimal(cost) if cost is not None else None
+    except ArithmeticError:
+        raise ValueError("costo no decimal") from None
+    return UsageRecord(
+        ts=datetime.fromisoformat(stamp.removesuffix(_UTC_SUFFIX)).replace(tzinfo=UTC),
+        correlation_id=data["correlation_id"],
+        provider=data["provider"],
+        model=data["model"],
+        profile=data["profile"],
+        agent=data["agent"],
+        ritual=data["ritual"],
+        attempt=data["attempt"],
+        latency_ms=data["latency_ms"],
+        tokens_prompt=data["tokens_prompt"],
+        tokens_completion=data["tokens_completion"],
+        cost_usd=amount,
+        cost_status=CostStatus(data["cost_status"]),
+        outcome=UsageOutcome(data["outcome"]),
+        http_status=data["http_status"],
+    )
+
+
+class JsonlUsageReader:
+    """Lee `usage-AAAA-MM.jsonl`. Las líneas dañadas se cuentan y se saltan; nunca se muestran."""
+
+    def __init__(self, directory: Path) -> None:
+        self._dir = directory
+
+    def read_month(self, year: int, month: int) -> UsageScan:
+        if not 1 <= month <= MONTHS_PER_YEAR:
+            raise ValueError("el mes debe estar entre 1 y 12")
+        path = self._dir / f"usage-{year:04d}-{month:02d}.jsonl"
+        try:
+            text = path.read_text(encoding="utf-8")
+        except FileNotFoundError:
+            return UsageScan((), 0, 0)
+        except OSError as error:
+            raise LogWriteError(f"no se pudo leer {path.name}: {error.strerror}") from None
+        records: list[UsageRecord] = []
+        malformed = 0
+        for line in text.splitlines():
+            if not line.strip():
+                continue
+            try:
+                records.append(_usage_record(json.loads(line)))
+            except (ValueError, TypeError, RecursionError):
+                malformed += 1
+        return UsageScan(tuple(records), malformed, 1)

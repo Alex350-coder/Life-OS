@@ -6,8 +6,8 @@ Lo que no se conoce se informa como desconocido; nunca se suma como 0.
 from decimal import Decimal
 
 import pytest
-from lifeos.application.usage_report import summarize
 
+from lifeos.application.usage_report import summarize
 from lifeos.ports.logs import CostStatus, UsageOutcome, UsageScan
 from tests.adapters.test_usage_reader import record
 
