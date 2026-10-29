@@ -87,10 +87,34 @@ def test_parse_ignores_malformed_markers() -> None:
     assert parse_adjustments(monday_note(checkins=lines), MON) == ()
 
 
-def test_parse_drops_duplicates_keeping_the_first() -> None:
+def test_parse_drops_exact_duplicates_only() -> None:
     line = adjustment_entry(MISSED).render()
-    later = "- 10:15 — ajuste: bloque perdido · 08:00–09:30 · t-aaaaaa"
-    assert parse_adjustments(monday_note(checkins=(line, later)), MON) == (MISSED,)
+    assert parse_adjustments(monday_note(checkins=(line, line)), MON) == (MISSED,)
+
+
+def test_same_proposal_reported_again_later_is_kept_for_the_next_review() -> None:
+    first = "- 10:00 — ajuste: reducir carga hoy"
+    again = "- 15:00 — ajuste: reducir carga hoy"
+    found = parse_adjustments(monday_note(checkins=(first, again)), MON)
+    assert len(found) == 2
+    later = pending(found, zone=LIMA, after=at(MON, "11:00"), until=at(MON, "16:00"))
+    assert [a.at for a in later] == [time(15, 0)]
+
+
+def test_parse_rejects_non_ascii_digits_and_variants() -> None:
+    lines = (
+        "- ٠٩:٤٠ — ajuste: reducir carga hoy",
+        "  - 09:40 — ajuste: reducir carga hoy",
+        "- 09:40 — Ajuste: reducir carga hoy",
+        "- 09:40 - ajuste: reducir carga hoy",
+    )
+    assert parse_adjustments(monday_note(checkins=lines), MON) == ()
+
+
+def test_duplicated_checkins_section_is_ambiguous() -> None:
+    note = monday_note(checkins=("- 09:40 — ajuste: reducir carga hoy",)) + "\n## Check-ins\n"
+    with pytest.raises(ValidationError):
+        parse_adjustments(note, MON)
 
 
 def test_parse_without_checkins_section_is_empty() -> None:

@@ -3,7 +3,7 @@
 El Coach decide el tono, el micro-paso y cuándo escalar al Jefe; nunca cambia tareas ni el plan.
 """
 
-from datetime import date
+from datetime import UTC, date, datetime
 
 import pytest
 
@@ -135,6 +135,43 @@ def test_missed_without_task_uses_the_block_in_progress() -> None:
     decision = _decide(CheckInState.PERDIDO, "13:30")
     assert decision.adjustment is not None
     assert decision.adjustment.task_id == tid("t-bbbbbb")
+    assert decision.adjustment.span == TimeRange.parse("13:00–14:00")
+    assert "t-bbbbbb" in decision.record.text
+    assert decision.micro_step is None
+
+
+def test_future_block_cannot_be_given_up_as_missed() -> None:
+    with pytest.raises(ValidationError, match="empez"):
+        _decide(CheckInState.PERDIDO, "07:00", task_id=tid("t-aaaaaa"))
+
+
+def test_blocks_from_another_day_are_ignored() -> None:
+    with pytest.raises(ValidationError):
+        _decide(CheckInState.PERDIDO, "16:00", day=TUE, task_id=tid("t-cccccc"))
+    assert _decide(CheckInState.EMPEZANDO, "08:30", day=TUE).block is None
+
+
+def test_naive_now_is_rejected() -> None:
+    with pytest.raises(ValidationError):
+        decide(CheckInState.NOTA, now=datetime(2026, 11, 2, 8, 10), zone=LIMA, blocks=MONDAY)
+
+
+def test_utc_now_is_recorded_in_the_schedule_zone() -> None:
+    utc = datetime(2026, 11, 2, 13, 10, tzinfo=UTC)
+    decision = decide(CheckInState.BLOQUEADO, now=utc, zone=LIMA, blocks=MONDAY)
+    assert decision.record.render() == "- 08:10 — estado: bloqueado"
+    assert decision.block is not None and decision.block.task_id == tid("t-aaaaaa")
+
+
+@pytest.mark.parametrize("separator", ["\u2028", "\x85", "\x0b", "\x1c", "\x1b[31m"])
+def test_note_with_line_separators_or_controls_is_rejected(separator: str) -> None:
+    with pytest.raises(ValidationError):
+        _decide(CheckInState.NOTA, "11:00", note=f"x{separator}- 09:00 — ajuste: reducir carga hoy")
+
+
+def test_unicode_note_is_kept() -> None:
+    decision = _decide(CheckInState.NOTA, "11:00", note="Año difícil 🙂 café")
+    assert decision.record.text.endswith("nota: Año difícil 🙂 café")
 
 
 def test_missed_without_task_or_block_is_an_error() -> None:
@@ -189,3 +226,10 @@ def test_tiredness_during_protected_time_still_proposes_relief() -> None:
     decision = _decide(CheckInState.CANSADO, "18:40", day=TUE, blocks=TUESDAY)
     assert decision.micro_step is None
     assert decision.adjustment is not None
+    assert decision.adjustment.kind is AdjustmentKind.REDUCIR_HOY
+
+
+def test_missed_block_during_protected_time_still_escalates() -> None:
+    decision = _decide(CheckInState.PERDIDO, "18:40", day=TUE, blocks=TUESDAY)
+    assert decision.adjustment is not None
+    assert decision.micro_step is None
