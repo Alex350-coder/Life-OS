@@ -8,14 +8,14 @@ bloques no realizados.
 from datetime import datetime
 
 import pytest
-from lifeos.application.closing import ClosingIncompleteError, DailyClosing
-from lifeos.domain.closing import AnswerKind, ClosingAnswer
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
+from lifeos.application.closing import ClosingIncompleteError, DailyClosing
 from lifeos.application.coach import CoachSession, NoDailyPlanError
 from lifeos.application.tasks import ApplicationError
 from lifeos.application.tools import ToolRegistry
 from lifeos.domain.adjustments import AdjustmentKind, parse_adjustments
+from lifeos.domain.closing import AnswerKind, ClosingAnswer
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.task import Effort, Progress
 from lifeos.ports.logs import AuditResult

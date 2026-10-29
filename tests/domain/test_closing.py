@@ -3,6 +3,7 @@
 from datetime import time
 
 import pytest
+
 from lifeos.domain.closing import (
     AnswerKind,
     ClosingAnswer,
@@ -11,7 +12,6 @@ from lifeos.domain.closing import (
     summary_entries,
     task_change,
 )
-
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.task import Checkbox, Effort, Progress
 from tests.planning_builders import tid

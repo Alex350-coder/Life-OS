@@ -94,6 +94,18 @@ class _Day:
     zone: ZoneInfo
 
 
+def schedule_zone(horario: str | None, configured: str | None) -> ZoneInfo:
+    """Zona de `_sistema/horario.md`, que debe coincidir con LIFEOS_TIMEZONE si está definida."""
+    if horario is None:
+        raise ApplicationError(f"falta {HORARIO_NOTE}: el ciclo diario necesita el horario (D-13)")
+    zone = parse_horario(horario).zone
+    if configured and configured != zone.key:
+        raise ApplicationError(
+            f"la zona del horario ({zone.key}) no coincide con LIFEOS_TIMEZONE ({configured})"
+        )
+    return zone
+
+
 def _count_entries(text: str) -> int:
     lines = section_lines(text, CHECKIN_SECTION) or ()
     return sum(1 for line in lines[1:] if line.startswith("- "))
@@ -126,16 +138,8 @@ class CoachSession:
         try:
             text = self._tools.leer_nota(actor, HORARIO_NOTE)
         except NoteNotFoundError:
-            raise ApplicationError(
-                f"falta {HORARIO_NOTE}: el Coach necesita el horario y su zona (D-13)"
-            ) from None
-        zone = parse_horario(text).zone
-        if self._configured_zone and self._configured_zone != zone.key:
-            raise ApplicationError(
-                f"la zona del horario ({zone.key}) no coincide con LIFEOS_TIMEZONE "
-                f"({self._configured_zone})"
-            )
-        return zone
+            text = None
+        return schedule_zone(text, self._configured_zone)
 
     def _today(self, actor: ActorContext, day: date | None) -> _Day:
         zone = self._zone(actor)
