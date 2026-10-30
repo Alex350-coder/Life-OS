@@ -3,7 +3,7 @@
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from datetime import date
+from datetime import date, timedelta
 
 from lifeos.domain.errors import LifeOSError, ValidationError
 from lifeos.domain.ids import TaskId, new_unique_task_id
@@ -46,6 +46,9 @@ DEFAULT_PROTECTED_ROOTS = (*RULES_FORBIDDEN_ROOTS, INBOX_ROOT)
 NOTE_SUFFIX = ".md"
 # Ids presentes en líneas mal formadas: siguen ocupados aunque la línea no se pueda analizar.
 _RAW_ID_RE = re.compile(r"\[id::\s*(t-[0-9a-z]{6})\s*\]")
+# Ventana de "tareas próximas" (F5-T02), en días desde hoy.
+MAX_UPCOMING_DAYS = 60
+CLOSED_STATUSES = frozenset({TaskStatus.COMPLETADA, TaskStatus.CANCELADA})
 
 
 class ApplicationError(LifeOSError):
@@ -160,6 +163,17 @@ def _matches(task: LocatedTask, query: TaskQuery) -> bool:
 def query_tasks(vault: VaultStore, query: TaskQuery) -> tuple[LocatedTask, ...]:
     """Consulta tareas. Por defecto excluye las archivadas (spec memoria-y-vigencia)."""
     return tuple(task for task in scan(vault).tasks if _matches(task, query))
+
+
+def upcoming_tasks(vault: VaultStore, today: date, *, days: int = 14) -> tuple[LocatedTask, ...]:
+    """Tareas abiertas que vencen en los próximos `days` días o ya vencieron, por fecha."""
+    if not 1 <= days <= MAX_UPCOMING_DAYS:
+        raise ValidationError("días", days, f"debe estar entre 1 y {MAX_UPCOMING_DAYS}")
+    found = query_tasks(vault, TaskQuery(due_to=today + timedelta(days=days)))
+    open_tasks = [item for item in found if item.task.status not in CLOSED_STATUSES]
+    return tuple(
+        sorted(open_tasks, key=lambda item: (item.task.due or today, item.task.title.casefold()))
+    )
 
 
 def find_task(vault: VaultStore, task_id: TaskId) -> LocatedTask:

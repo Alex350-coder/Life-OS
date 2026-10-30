@@ -10,6 +10,7 @@ import json
 import os
 import re
 import threading
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from enum import Enum
@@ -17,6 +18,8 @@ from pathlib import Path
 
 from lifeos.ports.logs import (
     AuditRecord,
+    AuditResult,
+    AuditScan,
     CostStatus,
     LogWriteError,
     UsageOutcome,
@@ -169,9 +172,6 @@ def _usage_record(data: object) -> UsageRecord:
         raise ValueError("entero esperado")
     if not all(data[name] is None or _is_int(data[name]) for name in _OPTIONAL_INT_FIELDS):
         raise ValueError("entero o null esperado")
-    stamp = data["ts"]
-    if not stamp.endswith(_UTC_SUFFIX):
-        raise ValueError("la hora debe estar en UTC")
     cost = data["cost_usd"]
     if cost is not None and not isinstance(cost, str):
         raise ValueError("costo como texto decimal")
@@ -182,7 +182,7 @@ def _usage_record(data: object) -> UsageRecord:
     if amount is not None and (not amount.is_finite() or amount < 0 or amount > MAX_COST_USD):
         raise ValueError("costo fuera de rango")
     return UsageRecord(
-        ts=datetime.fromisoformat(stamp.removesuffix(_UTC_SUFFIX)).replace(tzinfo=UTC),
+        ts=_utc_stamp(data["ts"]),
         correlation_id=data["correlation_id"],
         provider=data["provider"],
         model=data["model"],
@@ -200,29 +200,76 @@ def _usage_record(data: object) -> UsageRecord:
     )
 
 
+_AUDIT_FIELDS = frozenset(f.name for f in dataclasses.fields(AuditRecord))
+_AUDIT_TEXT_FIELDS = ("correlation_id", "actor", "action", "target", "result")
+
+
+def _utc_stamp(value: object) -> datetime:
+    if not isinstance(value, str) or not value.endswith(_UTC_SUFFIX):
+        raise ValueError("la hora debe estar en UTC")
+    return datetime.fromisoformat(value.removesuffix(_UTC_SUFFIX)).replace(tzinfo=UTC)
+
+
+def _audit_record(data: object) -> AuditRecord:
+    """Registro de auditoría tipado desde una línea JSON; cualquier desviación es `ValueError`."""
+    if not isinstance(data, dict) or set(data) != _AUDIT_FIELDS:
+        raise ValueError("campos inesperados")
+    if not all(isinstance(data[name], str) for name in _AUDIT_TEXT_FIELDS):
+        raise ValueError("texto esperado")
+    reason = data["reason"]
+    if reason is not None and not isinstance(reason, str):
+        raise ValueError("motivo como texto o null")
+    return AuditRecord(
+        ts=_utc_stamp(data["ts"]),
+        correlation_id=data["correlation_id"],
+        actor=data["actor"],
+        action=data["action"],
+        target=data["target"],
+        result=AuditResult(data["result"]),
+        reason=reason,
+    )
+
+
+def _read_month[R](
+    directory: Path, prefix: str, year: int, month: int, parse: Callable[[object], R]
+) -> tuple[tuple[R, ...], int, int]:
+    """Registros, líneas dañadas (se cuentan y se saltan; nunca se muestran) y archivos leídos."""
+    if not 1 <= month <= MONTHS_PER_YEAR:
+        raise ValueError("el mes debe estar entre 1 y 12")
+    path = directory / f"{prefix}-{year:04d}-{month:02d}.jsonl"
+    try:
+        text = path.read_text(encoding="utf-8")
+    except FileNotFoundError:
+        return (), 0, 0
+    except OSError as error:
+        raise LogWriteError(f"no se pudo leer {path.name}: {error.strerror}") from None
+    records: list[R] = []
+    malformed = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        try:
+            records.append(parse(json.loads(line)))
+        except (ValueError, TypeError, RecursionError, ArithmeticError):
+            malformed += 1
+    return tuple(records), malformed, 1
+
+
 class JsonlUsageReader:
-    """Lee `usage-AAAA-MM.jsonl`. Las líneas dañadas se cuentan y se saltan; nunca se muestran."""
+    """Lee `usage-AAAA-MM.jsonl`."""
 
     def __init__(self, directory: Path) -> None:
         self._dir = directory
 
     def read_month(self, year: int, month: int) -> UsageScan:
-        if not 1 <= month <= MONTHS_PER_YEAR:
-            raise ValueError("el mes debe estar entre 1 y 12")
-        path = self._dir / f"usage-{year:04d}-{month:02d}.jsonl"
-        try:
-            text = path.read_text(encoding="utf-8")
-        except FileNotFoundError:
-            return UsageScan((), 0, 0)
-        except OSError as error:
-            raise LogWriteError(f"no se pudo leer {path.name}: {error.strerror}") from None
-        records: list[UsageRecord] = []
-        malformed = 0
-        for line in text.splitlines():
-            if not line.strip():
-                continue
-            try:
-                records.append(_usage_record(json.loads(line)))
-            except (ValueError, TypeError, RecursionError, ArithmeticError):
-                malformed += 1
-        return UsageScan(tuple(records), malformed, 1)
+        return UsageScan(*_read_month(self._dir, "usage", year, month, _usage_record))
+
+
+class JsonlAuditReader:
+    """Lee `audit-AAAA-MM.jsonl` para el historial de cambios (F5-T04)."""
+
+    def __init__(self, directory: Path) -> None:
+        self._dir = directory
+
+    def read_month(self, year: int, month: int) -> AuditScan:
+        return AuditScan(*_read_month(self._dir, "audit", year, month, _audit_record))

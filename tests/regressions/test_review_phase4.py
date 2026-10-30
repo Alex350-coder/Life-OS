@@ -19,12 +19,13 @@ from lifeos.application.llm_calls import ModelGateway
 from lifeos.application.tasks import ApplicationError
 from lifeos.application.tools import ToolRegistry
 from lifeos.application.usage_report import summarize
-from lifeos.cli.main import _answers, _printable, build_parser
+from lifeos.cli.main import _answers, build_parser
 from lifeos.domain.adjustments import parse_adjustments
 from lifeos.domain.closing import AnswerKind, ClosingAnswer
 from lifeos.domain.coach import CheckInState, ReplyKind, decide, micro_step_for
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.plan_note import parse_daily_blocks, parse_weekly
+from lifeos.domain.text import printable as _printable
 from lifeos.ports.logs import CostStatus, UsageScan
 from lifeos.ports.vault import VaultPath
 from tests import config_samples as samples

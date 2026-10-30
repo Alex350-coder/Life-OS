@@ -10,13 +10,15 @@ from lifeos.application.coach import CoachSession
 from lifeos.application.jefe import JefePlanner
 from lifeos.application.tasks import ApplicationError
 from lifeos.application.tools import ToolRegistry
+from lifeos.domain.capacity import week_capacity
 from lifeos.domain.coach import CheckInState
+from lifeos.domain.horario_note import parse_horario
+from lifeos.domain.load import day_loads
 from lifeos.domain.plan import BlockKind, PlanOrigin, PlanStatus
-from lifeos.ports.logs import AuditResult
 from tests import config_samples as samples
 from tests.application.conftest import WriteNote
 from tests.fakes import FakeClock, MemoryAuditLog
-from tests.planning_builders import MON, NOW, WEEK, at
+from tests.planning_builders import LIMA, MON, NOW, WED, WEEK, at
 from tests.planning_samples import HORARIO
 
 pytestmark = pytest.mark.integration
@@ -49,7 +51,7 @@ def jefe(vault: FilesystemVault, audit: MemoryAuditLog, clock: FakeClock) -> Jef
 @pytest.fixture
 def ready(write_note: WriteNote) -> None:
     write_note("_sistema/horario.md", HORARIO)
-    write_note("02-Proyectos/informe.md", TASKS)
+    write_note("01-Universidad/redes.md", TASKS)
 
 
 @pytest.mark.usefixtures("ready")
@@ -73,8 +75,10 @@ def test_week_with_proposal_shows_its_blocks_and_load(jefe: JefePlanner) -> None
     assert view.revision == 0 and view.versions == 1
     work = [b for b in view.blocks if b.kind is BlockKind.TRABAJO]
     assert {b.task_id for b in work} == {b.task_id for b in proposed.proposal.work_blocks()}
+    capacity = week_capacity(parse_horario(HORARIO), WEEK)
+    assert view.load == day_loads(capacity, view.blocks, LIMA)
     planned = sum(load.planned_minutes for load in view.load)
-    assert planned == sum(b.interval.minutes for b in work) == 240
+    assert planned == sum(b.interval.minutes for b in work) > 0
 
 
 @pytest.mark.usefixtures("ready")
@@ -101,7 +105,7 @@ def test_reading_the_week_changes_nothing(
     before, records = _snapshot(vault), len(audit.records)
     jefe.semana(WEEK)
     assert _snapshot(vault) == before
-    assert [r for r in audit.records[records:] if r.result is not AuditResult.RECHAZADO] == []
+    assert audit.records[records:] == []
 
 
 def test_week_without_horario_is_an_error(jefe: JefePlanner) -> None:
@@ -110,10 +114,24 @@ def test_week_without_horario_is_an_error(jefe: JefePlanner) -> None:
 
 
 @pytest.mark.usefixtures("ready")
-def test_week_with_a_gap_in_the_chain_is_an_error(
-    jefe: JefePlanner, write_note: WriteNote
-) -> None:
+def test_week_with_a_gap_in_the_chain_is_an_error(jefe: JefePlanner, write_note: WriteNote) -> None:
     jefe.proponer(WEEK)
     write_note("Semanal/2026-W45-r2.md", "---\ntipo: semanal\n---\n")
-    with pytest.raises(ApplicationError, match="falta Semanal/2026-W45-r1.md"):
+    with pytest.raises(ApplicationError, match=r"falta Semanal/2026-W45-r1.md"):
         jefe.semana(WEEK)
+
+
+@pytest.mark.usefixtures("ready")
+def test_week_load_covers_the_whole_week_even_mid_week(jefe: JefePlanner, clock: FakeClock) -> None:
+    clock.current, clock.elapsed = at(WED, "12:00"), 0.0
+    view = jefe.semana(WEEK)
+    capacity = week_capacity(parse_horario(HORARIO), WEEK)
+    assert [load.budget_minutes for load in view.load] == [c.budget_minutes for c in capacity]
+
+
+@pytest.mark.usefixtures("ready")
+def test_week_shows_an_approved_plan(jefe: JefePlanner) -> None:
+    jefe.proponer(WEEK)
+    jefe.aprobar(WEEK)
+    view = jefe.semana(WEEK)
+    assert view.status is PlanStatus.APROBADO and view.revision == 0

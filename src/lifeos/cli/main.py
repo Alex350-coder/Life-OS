@@ -10,7 +10,6 @@ Solo traduce argumentos y resultados; las reglas viven en los casos de uso. Cód
 import argparse
 import re
 import sys
-import unicodedata
 from collections.abc import Callable, Mapping, Sequence
 from datetime import UTC
 from pathlib import Path
@@ -31,6 +30,7 @@ from lifeos.domain.errors import LifeOSError, ValidationError
 from lifeos.domain.ids import TaskId
 from lifeos.domain.plan import PlanOrigin
 from lifeos.domain.task import Area, Effort, Progress, TaskStatus
+from lifeos.domain.text import printable
 from lifeos.domain.weeks import IsoWeek
 from lifeos.ports.clock import Clock
 from lifeos.ports.llm import LlmError
@@ -288,15 +288,6 @@ def _runtime(
     return build_runtime(settings, with_llm=with_llm, clock=clock)
 
 
-_HIDDEN = frozenset({"Cc", "Cf", "Cs", "Co", "Cn", "Zl", "Zp"})
-
-
-def _printable(line: str) -> str:
-    """Sin caracteres de control, de formato (bidi) ni separadores de línea: un título de la
-    bóveda o un texto del modelo no puede manipular la terminal ni disfrazar lo que muestra."""
-    return "".join(ch for ch in line if unicodedata.category(ch) not in _HIDDEN)
-
-
 def _utf8(stream: TextIO) -> TextIO:
     reconfigure = getattr(stream, "reconfigure", None)
     if reconfigure is not None:  # consola de Windows: evita errores con "–" o acentos
@@ -320,27 +311,27 @@ def main(
         runtime = _runtime(args, environ, project_root, clock)
         code, lines = COMMANDS[args.command](runtime, args)
     except UsageError as error:
-        print(f"Error de uso: {_printable(str(error))}", file=stderr)
+        print(f"Error de uso: {printable(str(error))}", file=stderr)
         return EXIT_USAGE
     except CONFIG_ERRORS as error:
-        print(f"Error de configuración: {_printable(str(error))}", file=stderr)
+        print(f"Error de configuración: {printable(str(error))}", file=stderr)
         return EXIT_USAGE
     except AuditIncompleteError as error:
         print(
-            f"Aviso: la escritura SÍ se hizo, pero no quedó auditada: {_printable(str(error))}",
+            f"Aviso: la escritura SÍ se hizo, pero no quedó auditada: {printable(str(error))}",
             file=stderr,
         )
         return EXIT_REFUSED
     except LlmError as error:
         print(
-            f"Error del modelo: {_printable(str(error))}. Puedes repetir la orden sin --ia.",
+            f"Error del modelo: {printable(str(error))}. Puedes repetir la orden sin --ia.",
             file=stderr,
         )
         return EXIT_REFUSED
     except LifeOSError as error:
-        print(f"Error: {_printable(str(error))}", file=stderr)
+        print(f"Error: {printable(str(error))}", file=stderr)
         return EXIT_REFUSED
-    print("\n".join(_printable(line) for line in lines), file=stdout)
+    print("\n".join(printable(line) for line in lines), file=stdout)
     return code
 
 
