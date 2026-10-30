@@ -16,7 +16,11 @@ ALLOWED = {
     # Presentación (ADR-0003, revisión 2026-10-28): traduce entrada/salida hacia los casos de uso
     # y obtiene sus dependencias de la raíz de composición.
     "cli": {"domain", "ports", "application", "cli", "bootstrap"},
+    # Presentación web (ADR-0012, revisión de ADR-0003 del 2026-10-30): mismas reglas que la CLI.
+    "web": {"domain", "ports", "application", "web", "bootstrap"},
 }
+# Capas de presentación: ninguna otra capa las importa y no llaman a las reglas del planificador.
+PRESENTATION = ("cli", "web")
 # Dependencias de terceros permitidas por capa (ADR-0007). Dominio, puertos y aplicación no
 # conocen PyYAML ni Pydantic: los adaptadores devuelven tipos propios ya validados.
 THIRD_PARTY = {
@@ -25,6 +29,7 @@ THIRD_PARTY = {
     "application": set(),
     "adapters": {"yaml", "pydantic"},
     "cli": set(),
+    "web": {"fastapi", "starlette", "pydantic", "uvicorn"},
 }
 # Raíz de composición: único módulo que conecta capas (incluidos los adaptadores).
 COMPOSITION_ROOT = "bootstrap.py"
@@ -87,21 +92,23 @@ def test_only_known_modules_live_at_package_root() -> None:
     }
 
 
-def test_no_module_imports_the_presentation_layer() -> None:
+@pytest.mark.parametrize("layer", PRESENTATION)
+def test_no_module_imports_the_presentation_layer(layer: str) -> None:
     importers = {
         str(path.relative_to(SRC))
         for path in SRC.rglob("*.py")
-        if "cli" not in path.relative_to(SRC).parts and "cli" in _lifeos_imports(path)
+        if layer not in path.relative_to(SRC).parts and layer in _lifeos_imports(path)
     }
     assert importers == set()
 
 
-def test_cli_does_not_import_planning_rules() -> None:
-    # F3-T05: la CLI no contiene reglas de negocio ni llama directamente a las del planificador.
+@pytest.mark.parametrize("layer", PRESENTATION)
+def test_presentation_does_not_import_planning_rules(layer: str) -> None:
+    # F3-T05 y F5: la CLI y la web no contienen reglas de negocio ni llaman a las del planificador.
     rules = {"capacity", "plan_validator", "heuristic", "schedule", "horario_note"}
     imported = {
         node.module.rsplit(".", 1)[-1]
-        for path in (SRC / "cli").rglob("*.py")
+        for path in (SRC / layer).rglob("*.py")
         for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
         if isinstance(node, ast.ImportFrom) and node.module
     }
