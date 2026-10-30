@@ -29,8 +29,10 @@ TOOL_WRITE_MODES: Mapping[str, WriteMode | None] = MappingProxyType(
         "listar_tareas": None,
         "crear_captura": WriteMode.CREAR,
         "anexar_checkin": WriteMode.ANEXAR_SECCION,
+        "publicar_plan": WriteMode.PLAN,  # solo el dueño del plan global (ADR-0002, SEC-09)
     }
 )
+PUBLISH_TOOL = "publicar_plan"
 _SOURCE = "configuración de agentes"
 # RULES E.12: Salud y Finanzas sin lectura de agentes hasta su fase. La política puede ampliar
 # las áreas restringidas, nunca quitar estas.
@@ -46,6 +48,9 @@ class EffectivePermissions:
     tools: frozenset[str]
     # Copia de las raíces prohibidas: la bóveda con permisos las vuelve a comprobar.
     forbidden_write: tuple[VaultPath, ...]
+    # Concesiones `plan` de la política: solo el dueño del plan global con `publicar_plan`.
+    # Van aparte de `writes` porque ningún archivo de agente puede solicitarlas.
+    plan_writes: tuple[WriteGrant, ...] = ()
 
 
 def _same_section(granted: str | None, requested: str | None) -> bool:
@@ -82,6 +87,11 @@ def _check_ceiling(name: str, ceiling: AgentCeiling, policy: Policy) -> list[str
         f"{name}: herramienta desconocida '{tool}' en la política"
         for tool in sorted(ceiling.tools - TOOL_WRITE_MODES.keys())
     ]
+    if PUBLISH_TOOL in ceiling.tools:
+        if name != policy.plan_owner:
+            problems.append(f"{name}: solo el dueño del plan global puede tener '{PUBLISH_TOOL}'")
+        elif not _plan_grants(ceiling):
+            problems.append(f"{name}: '{PUBLISH_TOOL}' requiere escritura en modo plan")
     problems += [
         f"{name}: lectura '{root}' está en un área restringida"
         for root in ceiling.reads
@@ -136,6 +146,10 @@ def _check_writes(agent: AgentConfig, ceiling: AgentCeiling, policy: Policy) -> 
     return problems
 
 
+def _plan_grants(ceiling: AgentCeiling) -> tuple[WriteGrant, ...]:
+    return tuple(grant for grant in ceiling.writes if grant.mode is WriteMode.PLAN)
+
+
 def _check_tools(
     agent: AgentConfig, ceiling: AgentCeiling, tools: Mapping[str, WriteMode | None]
 ) -> list[str]:
@@ -147,6 +161,9 @@ def _check_tools(
         if tool not in ceiling.tools:
             problems.append(f"{agent.id}: herramienta '{tool}' no autorizada por la política")
         mode = tools[tool]
+        if mode is WriteMode.PLAN:
+            # El modo plan no se solicita: lo concede la política (validada en _check_ceiling).
+            continue
         if mode is not None and not any(grant.mode is mode for grant in agent.writes):
             problems.append(f"{agent.id}: la herramienta '{tool}' requiere escritura '{mode}'")
     return problems
@@ -187,6 +204,12 @@ def _duplicates(agents: Iterable[AgentConfig]) -> list[str]:
     return problems
 
 
+def _effective_plan_writes(agent: AgentConfig, policy: Policy) -> tuple[WriteGrant, ...]:
+    if agent.id != policy.plan_owner or PUBLISH_TOOL not in agent.tools:
+        return ()
+    return _plan_grants(policy.agents[agent.id])
+
+
 def resolve_effective(
     policy: Policy,
     catalog: ModelCatalog,
@@ -210,6 +233,7 @@ def resolve_effective(
                 writes=agent.writes,
                 tools=frozenset(agent.tools),
                 forbidden_write=policy.forbidden_write,
+                plan_writes=_effective_plan_writes(agent, policy),
             )
             for agent in agents
         }

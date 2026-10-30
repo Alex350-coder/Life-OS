@@ -4,9 +4,8 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 
-from lifeos.ports.logs import AuditRecord, AuditResult, LogWriteError, UsageRecord
-
 from lifeos.ports.llm import LlmError, LlmRequest, LlmResponse, TokenUsage
+from lifeos.ports.logs import AuditRecord, AuditResult, LogWriteError, UsageRecord
 
 FIXED_NOW = datetime(2026, 10, 27, 9, 30, tzinfo=UTC)
 

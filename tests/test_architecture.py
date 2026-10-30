@@ -13,6 +13,9 @@ ALLOWED = {
     "ports": {"domain", "ports"},
     "application": {"domain", "ports", "application"},
     "adapters": {"domain", "ports", "adapters"},
+    # Presentación (ADR-0003, revisión 2026-10-28): traduce entrada/salida hacia los casos de uso
+    # y obtiene sus dependencias de la raíz de composición.
+    "cli": {"domain", "ports", "application", "cli", "bootstrap"},
 }
 # Dependencias de terceros permitidas por capa (ADR-0007). Dominio, puertos y aplicación no
 # conocen PyYAML ni Pydantic: los adaptadores devuelven tipos propios ya validados.
@@ -21,6 +24,7 @@ THIRD_PARTY = {
     "ports": set(),
     "application": set(),
     "adapters": {"yaml", "pydantic"},
+    "cli": set(),
 }
 # Raíz de composición: único módulo que conecta capas (incluidos los adaptadores).
 COMPOSITION_ROOT = "bootstrap.py"
@@ -81,6 +85,27 @@ def test_only_known_modules_live_at_package_root() -> None:
     assert {p.name for p in SRC.iterdir() if p.is_dir() and p.name != "__pycache__"} <= {
         *ALLOWED,
     }
+
+
+def test_no_module_imports_the_presentation_layer() -> None:
+    importers = {
+        str(path.relative_to(SRC))
+        for path in SRC.rglob("*.py")
+        if "cli" not in path.relative_to(SRC).parts and "cli" in _lifeos_imports(path)
+    }
+    assert importers == set()
+
+
+def test_cli_does_not_import_planning_rules() -> None:
+    # F3-T05: la CLI no contiene reglas de negocio ni llama directamente a las del planificador.
+    rules = {"capacity", "plan_validator", "heuristic", "schedule", "horario_note"}
+    imported = {
+        node.module.rsplit(".", 1)[-1]
+        for path in (SRC / "cli").rglob("*.py")
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.ImportFrom) and node.module
+    }
+    assert imported & rules == set()
 
 
 def test_composition_root_has_no_third_party_imports() -> None:

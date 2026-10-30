@@ -9,17 +9,27 @@ auditan.
 
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
+from functools import partial
 
 from lifeos.application.capture import INBOX, capture
-from lifeos.application.checkin import append_checkin
-from lifeos.application.permissions import TOOL_WRITE_MODES, EffectivePermissions
+from lifeos.application.checkin import append_to_section
+from lifeos.application.permissions import PUBLISH_TOOL, TOOL_WRITE_MODES, EffectivePermissions
+from lifeos.application.plan_publication import (
+    NoteWrite,
+    PartialPublicationError,
+    PlanPublication,
+    PlanRejectedError,
+    check_publication,
+    planned_writes,
+)
 from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.application.tasks import LocatedTask, TaskQuery, query_tasks
-from lifeos.domain.checkin import CheckInEntry
+from lifeos.domain.checkin import CHECKIN_HEADING, CHECKIN_SECTION, CheckInEntry
+from lifeos.domain.errors import LifeOSError
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import WriteMode
 from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult, LogWriteError
-from lifeos.ports.vault import PathRejectedError, VaultPath, VaultStore
+from lifeos.ports.vault import PathRejectedError, Snapshot, VaultPath, VaultStore
 
 _REJECTED_PATH = "(ruta rechazada)"
 
@@ -120,6 +130,16 @@ class ToolRegistry:
         except PermissionDeniedError as error:
             raise self._deny(actor, tool, str(target), error) from None
 
+    def leer_nota_versionada(self, actor: ActorContext, path: str) -> Snapshot:
+        """Como `leer_nota`, con la versión para escribir después sin pisar ediciones."""
+        tool = "leer_nota"
+        target = self._parse(actor, tool, path)
+        vault = self._scoped(actor, tool, str(target), TOOL_WRITE_MODES[tool])
+        try:
+            return vault.read(target)
+        except PermissionDeniedError as error:
+            raise self._deny(actor, tool, str(target), error) from None
+
     def listar_tareas(self, actor: ActorContext, query: TaskQuery) -> tuple[LocatedTask, ...]:
         tool = "listar_tareas"
         vault = self._scoped(actor, tool, "(bóveda)", TOOL_WRITE_MODES[tool])
@@ -133,8 +153,57 @@ class ToolRegistry:
             actor, tool, str(INBOX), lambda: capture(vault, texto, now=now, source=actor.agent_id)
         )
 
-    def anexar_checkin(self, actor: ActorContext, path: str, entry: CheckInEntry) -> VaultPath:
+    def anexar_checkin(
+        self, actor: ActorContext, path: str, entry: CheckInEntry, *more: CheckInEntry
+    ) -> VaultPath:
+        """Anexa una o varias entradas seguidas en `## Check-ins` con una sola escritura."""
         tool = "anexar_checkin"
         target = self._parse(actor, tool, path)
         vault = self._scoped(actor, tool, str(target), TOOL_WRITE_MODES[tool])
-        return self._write(actor, tool, str(target), lambda: append_checkin(vault, target, entry))
+        entries = (entry, *more)
+        return self._write(
+            actor,
+            tool,
+            str(target),
+            lambda: append_to_section(vault, target, CHECKIN_SECTION, CHECKIN_HEADING, entries),
+        )
+
+    def publicar_plan(
+        self, actor: ActorContext, publication: PlanPublication
+    ) -> tuple[VaultPath, ...]:
+        """Publica un plan validado (SEC-09): solo el dueño del plan global, solo en modo plan.
+
+        Valida antes de escribir y escribe el render canónico del plan validado (el llamador no
+        aporta texto). Un rechazo se audita y no escribe nada. Las notas diarias van antes que
+        la semanal; si algo falla a mitad, `PartialPublicationError` dice qué quedó escrito.
+        """
+        tool = PUBLISH_TOOL
+        target = publication.weekly_target
+        vault = self._scoped(actor, tool, target, TOOL_WRITE_MODES[tool])
+        try:
+            check_publication(publication)
+            writes = planned_writes(vault, publication)
+        except PlanRejectedError:
+            self._log(actor, tool, target, AuditResult.RECHAZADO, "plan_invalido")
+            raise
+        except PermissionDeniedError as error:
+            raise self._deny(actor, tool, target, error) from None
+        except LifeOSError as error:
+            self._log(actor, tool, target, AuditResult.RECHAZADO, type(error).__name__)
+            raise
+        written: list[VaultPath] = []
+        for write in writes:
+            try:
+                written.append(
+                    self._write(actor, tool, str(write.path), partial(_write_note, vault, write))
+                )
+            except LifeOSError as error:
+                if not written:
+                    raise
+                raise PartialPublicationError(tuple(written), error) from error
+        return tuple(written)
+
+
+def _write_note(vault: VaultStore, write: NoteWrite) -> VaultPath:
+    vault.write(write.path, write.text, expected=write.expected)
+    return write.path

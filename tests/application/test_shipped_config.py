@@ -29,6 +29,14 @@ def test_shipped_config_resolves_for_jefe_and_coach(source: YamlConfigSource) ->
         contracts=KNOWN_CONTRACTS,
     )
     assert set(effective) == {"jefe", "coach"}
+    # Fase 3 (SEC-09): solo el Jefe recibe las concesiones de publicación del plan.
+    assert {str(grant.root) for grant in effective["jefe"].plan_writes} == {"Semanal", "Diario"}
+    assert effective["coach"].plan_writes == ()
+
+
+def test_shipped_coach_answers_with_the_coach_contract(source: YamlConfigSource) -> None:
+    coach = next(agent for agent in source.load_agents() if agent.id == "coach")
+    assert coach.contract_out == "coach_v1"
 
 
 def test_shipped_coach_cannot_write_plan_or_system_folders(source: YamlConfigSource) -> None:

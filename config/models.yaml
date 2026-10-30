@@ -12,7 +12,7 @@ perfiles:
     proveedor: nvidia
     modelo: mistralai/mistral-large-2-instruct   # candidato; se confirma con la llamada real
     timeout_s: 60
-    max_tokens: 2048
+    max_tokens: 4096        # plan_v1 puede ocupar ~30 tokens por bloque (F3-T06)
   ligero:
     proveedor: nvidia
     modelo: google/gemma-3-12b-it                # candidato; se confirma con la llamada real

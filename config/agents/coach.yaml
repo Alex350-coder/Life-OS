@@ -8,7 +8,7 @@ modelo_solicitado:
   perfil: ligero
 contrato:
   entrada: checkin_v1
-  salida: checkin_v1
+  salida: coach_v1
 herramientas: [leer_nota, listar_tareas, crear_captura, anexar_checkin]
 permisos_solicitados:
   lectura:

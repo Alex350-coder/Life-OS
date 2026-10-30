@@ -1,13 +1,13 @@
 """Secciones de nota (`## Título`) y verificación de que un cambio solo inserta líneas en una."""
 
 import pytest
+
+from lifeos.domain.errors import ValidationError
 from lifeos.domain.sections import (
     find_section,
     only_inserted_in_section,
     section_insert_index,
 )
-
-from lifeos.domain.errors import ValidationError
 
 pytestmark = pytest.mark.unit
 

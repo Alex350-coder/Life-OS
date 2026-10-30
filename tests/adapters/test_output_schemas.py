@@ -16,7 +16,7 @@ CAPTURE = SCHEMAS["captura_v1"]
 
 
 def test_registered_schema_ids() -> None:
-    assert set(SCHEMAS) == {"captura_v1", "checkin_v1"}
+    assert set(SCHEMAS) == {"captura_v1", "checkin_v1", "plan_v1", "coach_v1"}
     assert CHECKIN.id == "checkin_v1"
 
 
