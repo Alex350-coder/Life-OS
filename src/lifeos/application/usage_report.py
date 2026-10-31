@@ -61,6 +61,23 @@ def _row(agent: str, ritual: str, records: Iterable[UsageRecord]) -> UsageRow:
     )
 
 
+def combine(rows: Iterable[UsageRow], *, agent: str, ritual: str) -> UsageRow:
+    """Suma filas ya agrupadas (p. ej., todos los rituales de un agente)."""
+    items = list(rows)
+    return UsageRow(
+        agent=agent,
+        ritual=ritual,
+        calls=sum(r.calls for r in items),
+        attempts=sum(r.attempts for r in items),
+        errors=sum(r.errors for r in items),
+        tokens_prompt=sum(r.tokens_prompt for r in items),
+        tokens_completion=sum(r.tokens_completion for r in items),
+        tokens_unknown=sum(r.tokens_unknown for r in items),
+        cost_estimated=sum((r.cost_estimated for r in items), Decimal(0)),
+        cost_unknown=sum(r.cost_unknown for r in items),
+    )
+
+
 def summarize(scan: UsageScan) -> UsageSummary:
     groups: dict[tuple[str, str], list[UsageRecord]] = defaultdict(list)
     for record in scan.records:

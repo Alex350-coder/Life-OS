@@ -20,15 +20,17 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
+from zoneinfo import ZoneInfo
 
 from lifeos.application.plan_publication import PlanPublication, PlanRejectedError
 from lifeos.application.tasks import ApplicationError, TaskQuery
 from lifeos.application.tools import ActorContext, ToolRegistry
 from lifeos.domain.adjustments import Adjustment, adjustment_entry, parse_adjustments, pending
-from lifeos.domain.capacity import local_datetime
+from lifeos.domain.capacity import local_datetime, week_capacity
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.heuristic import propose, unplanned_after
 from lifeos.domain.horario_note import HORARIO_NOTE, parse_horario
+from lifeos.domain.load import DayLoad, day_loads
 from lifeos.domain.plan import (
     Block,
     Conflict,
@@ -95,10 +97,28 @@ class PlanOutcome:
     conflicts: tuple[Conflict, ...]
     path: VaultPath | None  # None si se rechazó: no se guardó nada
     status: PlanStatus | None
+    zone: ZoneInfo  # zona del horario con la que se calculó el plan
 
     @property
     def accepted(self) -> bool:
         return self.path is not None
+
+
+@dataclass(frozen=True, slots=True)
+class WeekView:
+    """Último plan de la cadena de una semana y su carga por día (solo lectura, F5-T02)."""
+
+    week: IsoWeek
+    zone: ZoneInfo
+    path: str | None  # None si la semana no tiene plan
+    status: PlanStatus | None
+    origin: PlanOrigin | None
+    revision: int
+    generated: datetime | None
+    justification: str
+    blocks: tuple[Block, ...]
+    load: tuple[DayLoad, ...]
+    versions: int  # plan original más revisiones
 
 
 class JefePlanner:
@@ -196,6 +216,30 @@ class JefePlanner:
             except ValidationError as error:
                 raise ApplicationError(f"{daily_path(day)}: {error.reason}") from error
         return tuple(found)
+
+    # --- Vista (solo lectura) ----------------------------------------------------------------
+
+    def semana(self, week: IsoWeek | None = None) -> WeekView:
+        """Plan vigente de la semana tal como está en la bóveda, sin escribir nada."""
+        actor = self.new_actor()
+        schedule = self._schedule(actor)
+        target = self._week(week, schedule)
+        chain = self._chain(actor, target)
+        latest = chain[-1] if chain else None
+        blocks = latest.note.blocks if latest else ()
+        return WeekView(
+            week=target,
+            zone=schedule.zone,
+            path=latest.path if latest else None,
+            status=latest.note.status if latest else None,
+            origin=latest.note.origin if latest else None,
+            revision=latest.note.revision if latest else 0,
+            generated=latest.note.generated if latest else None,
+            justification=latest.note.justification if latest else "",
+            blocks=blocks,
+            load=day_loads(week_capacity(schedule, target), blocks, schedule.zone),
+            versions=len(chain),
+        )
 
     # --- Propuesta ------------------------------------------------------------------------
 
@@ -380,8 +424,12 @@ class JefePlanner:
         try:
             paths = self._tools.publicar_plan(actor, publication)
         except PlanRejectedError as rejected:
-            return PlanOutcome(publication.proposal, rejected.conflicts, None, None)
-        return PlanOutcome(publication.proposal, (), paths[-1], publication.status)
+            return PlanOutcome(
+                publication.proposal, rejected.conflicts, None, None, publication.context.zone
+            )
+        return PlanOutcome(
+            publication.proposal, (), paths[-1], publication.status, publication.context.zone
+        )
 
 
 def _rendered(adjustments: tuple[Adjustment, ...]) -> tuple[str, ...]:

@@ -16,7 +16,12 @@ from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
-from lifeos.adapters.jsonl_logs import JsonlAuditLog, JsonlUsageLog, JsonlUsageReader
+from lifeos.adapters.jsonl_logs import (
+    JsonlAuditLog,
+    JsonlAuditReader,
+    JsonlUsageLog,
+    JsonlUsageReader,
+)
 from lifeos.adapters.nvidia_llm import NvidiaChatClient
 from lifeos.adapters.schemas import SCHEMAS
 from lifeos.adapters.secrets import MissingSecretError, Secret, read_dotenv, resolve_secret
@@ -36,9 +41,15 @@ from lifeos.application.permissions import (
 )
 from lifeos.application.tools import ToolRegistry
 from lifeos.ports.clock import Clock
-from lifeos.ports.config import ConfigError, ConfigRejectedError, ModelCatalog, Policy
+from lifeos.ports.config import (
+    AgentConfig,
+    ConfigError,
+    ConfigRejectedError,
+    ModelCatalog,
+    Policy,
+)
 from lifeos.ports.llm import LlmClient
-from lifeos.ports.logs import AuditLog, UsageLog, UsageReader
+from lifeos.ports.logs import AuditLog, AuditReader, UsageLog, UsageReader
 from lifeos.ports.vault import VaultPath, VaultStore
 
 ENV_FILE = ".env"
@@ -97,6 +108,9 @@ class Runtime:
     coach: CoachSession | None
     closing: DailyClosing | None  # cierre diario del propietario (con propuestas del Coach)
     usage_reader: UsageReader
+    # Configuración validada de los agentes y lector de auditoría (vista de la web, F5-T04).
+    agents: tuple[AgentConfig, ...]
+    audit_reader: AuditReader
 
 
 def _provider_secrets(settings: Settings, catalog: ModelCatalog) -> dict[str, Secret]:
@@ -168,10 +182,11 @@ def build_runtime(
     source = YamlConfigSource(settings.config_dir)
     policy = source.load_policy()
     catalog = source.load_catalog()
+    agents = source.load_agents()
     permissions = resolve_effective(
         policy,
         catalog,
-        source.load_agents(),
+        agents,
         tools=TOOL_WRITE_MODES,
         contracts=frozenset(SCHEMAS),
     )
@@ -207,4 +222,6 @@ def build_runtime(
         coach=coach,
         closing=closing,
         usage_reader=JsonlUsageReader(settings.logs_dir),
+        agents=agents,
+        audit_reader=JsonlAuditReader(settings.logs_dir),
     )

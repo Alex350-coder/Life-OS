@@ -102,3 +102,18 @@ class UsageReader(Protocol):
     """Lectura del registro de uso (solo lectura; `lifeos uso`)."""
 
     def read_month(self, year: int, month: int) -> UsageScan: ...
+
+
+@dataclass(frozen=True, slots=True)
+class AuditScan:
+    """Registros de auditoría de un mes. `malformed` cuenta las líneas que no se pudieron leer."""
+
+    records: tuple[AuditRecord, ...]
+    malformed: int
+    files: int
+
+
+class AuditReader(Protocol):
+    """Lectura de la auditoría (solo lectura; historial de cambios de la web, F5-T04)."""
+
+    def read_month(self, year: int, month: int) -> AuditScan: ...

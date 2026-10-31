@@ -6,14 +6,18 @@ authors = [{ name = "Alexander" }]
 requires-python = ">=3.12"
 # Fase 2 (ADR-0007): PyYAML y Pydantic, usados solo en `adapters` (tests/test_architecture.py).
 # Fase 3: tzdata da a `zoneinfo` la base de zonas IANA en Windows (no tiene una del sistema).
+# Fase 5 (ADR-0012): FastAPI y uvicorn, usados solo en la capa `web` (tests/test_architecture.py).
 dependencies = [
+    "fastapi>=0.162,<1",
     "pydantic>=2.9,<3",
     "pyyaml>=6.0.2,<7",
     "tzdata>=2025.2",
+    "uvicorn>=0.54,<1",
 ]
 
 [project.scripts]
 lifeos = "lifeos.cli.main:main"
+lifeos-web = "lifeos.web.server:main"
 
 [build-system]
 requires = ["uv_build>=0.11.18,<0.12.0"]
@@ -22,6 +26,9 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--import-mode=importlib", "-m", "not live"]
+# Starlette 1.x recomienda httpx2 para TestClient; httpx sigue funcionando y httpx2 no se ha
+# evaluado todavía (limitación registrada en la Fase 5).
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
 markers = [
     "unit: pruebas de dominio y reglas puras",
     "integration: pruebas contra una bóveda temporal en disco",
@@ -64,6 +71,7 @@ exclude_dirs = ["tests"]
 [dependency-groups]
 dev = [
     "bandit>=1.9.4",
+    "httpx>=0.28.1",
     "mypy>=2.4.0",
     "pytest>=9.1.1",
     "pytest-cov>=7.1.0",

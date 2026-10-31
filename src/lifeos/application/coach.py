@@ -149,6 +149,10 @@ class CoachSession:
             text = None
         return schedule_zone(text, self._configured_zone)
 
+    def today(self) -> date:
+        """Día local de hoy según la zona del horario (no necesita la nota diaria)."""
+        return self._clock.now().astimezone(self._zone(self.new_actor())).date()
+
     def _today(self, actor: ActorContext, day: date | None) -> _Day:
         zone = self._zone(actor)
         target = day or self._clock.now().astimezone(zone).date()

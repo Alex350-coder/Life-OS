@@ -66,6 +66,36 @@ uv run lifeos uso --mes 2026-11                      # resumen del log de uso (n
   - Haz el cierre antes de replanificar: el trabajo hecho y no confirmado se vuelve a planificar.
 - **Cerca de medianoche.** `hoy`, `checkin` y `cierre` usan el día local de la hora actual. Pasada la medianoche corresponden al día nuevo, así que cierra antes.
 
+## Web local (Fase 5, Hito H2; ADR-0012 y ADR-0013)
+Requiere además Node.js 20+ (con npm). La web usa los mismos casos de uso que la CLI.
+
+```bash
+cd web && npm ci && npm run build && cd ..   # compila el frontend en web/dist/ (una vez por cambio)
+uv run lifeos-web                            # escucha solo en 127.0.0.1:8765 (LIFEOS_WEB_PORT)
+```
+
+- **Acceso.** Al arrancar se muestra una URL `http://127.0.0.1:8765/auth?token=…`.
+  - Es de un solo uso y caduca en 5 minutos. Ábrela en el navegador y no la compartas.
+  - Crea una sesión con una cookie `HttpOnly` y `SameSite=Strict` que dura 12 horas.
+  - Reiniciar el servidor cierra todas las sesiones; para volver a entrar, usa la URL nueva.
+- **Vistas.**
+  - *Hoy:* bloque actual, chat con el Coach (check-in) y cierre, que pide vista previa antes de confirmar.
+  - *Semana:* carga por día, tiempo protegido y chat con el Jefe (proponer, aprobar y replanificar).
+  - *Tareas:* captura rápida, próximos vencimientos y filtros.
+  - *Historial:* la auditoría de este mes y del anterior.
+  - *Agentes:* en solo lectura, con permisos efectivos y uso del mes.
+- **IA.** Las casillas de IA usan las mismas opciones `--ia` de la CLI y necesitan `NVIDIA_API_KEY`. Admiten 6 peticiones por minuto.
+- **Seguridad (SEC-11).**
+  - Una petición sin sesión recibe 401.
+  - Se rechaza (400/403) si el Host u Origin no son de 127.0.0.1 o localhost en ese puerto, si llega desde otro sitio (`Sec-Fetch-Site`) o si falta el token CSRF.
+  - No hay CORS. La CSP es estricta y no admite scripts ni estilos en línea.
+  - El límite es de 240 peticiones por minuto por sesión, con un cuerpo máximo de 64 KB.
+  - No se registran los accesos, porque la URL de arranque lleva el token.
+- **Desarrollo del frontend** (en `web/`):
+  - `npm run lint`, `npm run typecheck`, `npm test` (Vitest) y `npm run test:coverage`.
+  - `npm run e2e` (Playwright con Chromium). Antes necesita `npx playwright install chromium` y `npm run build`.
+  - El E2E arranca `scripts/e2e_server.py`: una bóveda temporal con datos inventados, reloj fijo y token conocido.
+
 ## Verificación real del proveedor
 ```bash
 uv run python scripts/smoke_nvidia.py            # perfiles ligero y grande
@@ -84,6 +114,8 @@ Envía un texto fijo sin datos personales y deja un registro en `logs/usage-AAAA
 - `src/lifeos/application/`: casos de uso, permisos efectivos, bóveda con permisos, herramientas, pasarela de modelos, caso de uso del Jefe (`jefe.py`, con replanificación), propuesta con IA (`jefe_ai.py`) y publicación (`plan_publication.py`). Además, Coach (`coach.py`, `coach_ai.py`), cierre diario (`closing.py`) y resumen de uso (`usage_report.py`) (Fase 4).
 - `src/lifeos/domain/`: además, reglas del Coach, propuestas de ajuste, cierre y replanificación (`coach.py`, `adjustments.py`, `closing.py`, `replan.py`).
 - `src/lifeos/cli/`: CLI `lifeos` (presentación, sin reglas de negocio).
+- `src/lifeos/web/`: API local FastAPI y guardia de acceso (presentación, sin reglas de negocio; Fase 5). Lecturas nuevas en `application/history.py`, `agents_overview.py`, `tasks.upcoming_tasks`, `JefePlanner.semana` y `domain/load.py`.
+- `web/`: frontend React + TypeScript (Vite); `web/dist/` lo sirve el backend y no se versiona.
 - `src/lifeos/bootstrap.py`: raíz de composición; único módulo que conecta adaptadores con casos de uso.
-- `scripts/`: utilidades manuales (verificación real del proveedor).
-- `tests/`: pruebas unitarias, de integración y de seguridad (marcadores `unit`, `integration`, `security`).
+- `scripts/`: utilidades manuales (verificación real del proveedor) y el servidor de pruebas E2E.
+- `tests/`: pruebas unitarias, de integración y de seguridad (marcadores `unit`, `integration`, `security`); `tests/web/` prueba la API real con `TestClient`.

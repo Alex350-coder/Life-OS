@@ -37,3 +37,11 @@ Thumbs.db
 
 # Herramientas locales de Claude Code
 .claude/
+
+# Frontend web (Fase 5, ADR-0012): dependencias, compilado y artefactos de pruebas.
+web/node_modules/
+web/dist/
+web/test-results/
+web/playwright-report/
+web/coverage/
+web/playwright/.auth/
