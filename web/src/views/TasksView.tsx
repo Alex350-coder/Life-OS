@@ -1,4 +1,4 @@
-import { useState, type FormEvent } from "react";
+import { useDeferredValue, useEffect, useState, type FormEvent } from "react";
 import { get, post } from "../api/client";
 import type { Task } from "../api/types";
 import { useApi } from "../api/useApi";
@@ -7,6 +7,19 @@ import { ErrorBanner, Loading } from "../components/common";
 // Mismos valores que domain/task.py (Area y TaskStatus).
 const AREAS = ["", "universidad", "proyectos", "carrera", "hobbies", "salud", "finanzas", "cotidiano"];
 const STATUSES = ["", "propuesta", "programada", "bloqueada", "confirmada", "completada", "cancelada"];
+
+const SEARCH_DELAY_MS = 300;
+
+// La búsqueda espera a que se deje de escribir: no se pide la API en cada tecla.
+function useDebounced(value: string, delayMs: number): string {
+  const [settled, setSettled] = useState(value);
+  const deferred = useDeferredValue(value);
+  useEffect(() => {
+    const id = setTimeout(() => setSettled(deferred), delayMs);
+    return () => clearTimeout(id);
+  }, [deferred, delayMs]);
+  return settled;
+}
 
 function TaskTable({ tasks, caption }: { tasks: Task[]; caption: string }) {
   if (tasks.length === 0) return <p className="muted">Sin tareas.</p>;
@@ -47,9 +60,12 @@ function Capture({ onSaved }: { onSaved: () => void }) {
   const [text, setText] = useState("");
   const [saved, setSaved] = useState<string | null>(null);
   const [error, setError] = useState<Error | null>(null);
+  const [isSaving, setIsSaving] = useState(false);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (isSaving) return; // un doble clic o Enter no crea dos notas
+    setIsSaving(true);
     setError(null);
     try {
       const result = await post<{ path: string }>("/api/capturas", { texto: text });
@@ -58,6 +74,8 @@ function Capture({ onSaved }: { onSaved: () => void }) {
       onSaved();
     } catch (reason) {
       setError(reason instanceof Error ? reason : new Error(String(reason)));
+    } finally {
+      setIsSaving(false);
     }
   }
 
@@ -66,11 +84,11 @@ function Capture({ onSaved }: { onSaved: () => void }) {
       <h2 id="capture-heading">Captura rápida</h2>
       <form className="row" onSubmit={handleSubmit}>
         <label className="wide">
-          Idea, tarea o recordatorio (va a 00-Inbox/)
+          Idea, tarea o recordatorio (obligatorio; va a 00-Inbox/)
           <input value={text} required maxLength={2000} onChange={(e) => setText(e.target.value)} />
         </label>
-        <button type="submit" disabled={text.trim() === ""}>
-          Guardar
+        <button type="submit" disabled={text.trim() === "" || isSaving}>
+          {isSaving ? "Guardando…" : "Guardar"}
         </button>
       </form>
       <ErrorBanner error={error} />
@@ -83,16 +101,20 @@ export function TasksView() {
   const [area, setArea] = useState("");
   const [status, setStatus] = useState("");
   const [text, setText] = useState("");
-  const [version, setVersion] = useState(0);
-  const upcoming = useApi(() => get<Task[]>("/api/tareas/proximas", { dias: 14 }), String(version));
+  const search = useDebounced(text, SEARCH_DELAY_MS);
+  const upcoming = useApi(() => get<Task[]>("/api/tareas/proximas", { dias: 14 }), "proximas");
   const all = useApi(
-    () => get<Task[]>("/api/tareas", { area, estado: status, texto: text }),
-    `${area}|${status}|${text}|${version}`,
+    () => get<Task[]>("/api/tareas", { area, estado: status, texto: search }),
+    `${area}|${status}|${search}`,
   );
+  const refresh = () => {
+    upcoming.reload();
+    all.reload();
+  };
 
   return (
     <div className="view">
-      <Capture onSaved={() => setVersion((n) => n + 1)} />
+      <Capture onSaved={refresh} />
       <section aria-labelledby="upcoming-heading" className="card">
         <h2 id="upcoming-heading">Próximos vencimientos (14 días y atrasadas)</h2>
         <ErrorBanner error={upcoming.error} />

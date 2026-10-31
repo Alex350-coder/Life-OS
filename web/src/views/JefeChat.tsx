@@ -12,20 +12,27 @@ const ACTIONS: { action: Action; label: string; usesAi: boolean }[] = [
   { action: "revision", label: "Replanificar desde ahora", usesAi: true },
 ];
 
+function isPlanResult(value: unknown): value is PlanResult {
+  if (typeof value !== "object" || value === null) return false;
+  const plan = value as Partial<PlanResult>;
+  return typeof plan.accepted === "boolean" && Array.isArray(plan.conflicts) && typeof plan.proposal === "object";
+}
+
 // Un plan rechazado llega como 422 con el resultado (conflictos) en `data`.
 function rejected(error: unknown): PlanResult | null {
-  if (error instanceof ApiError && error.code === "plan_rechazado" && error.data !== null) {
-    return error.data as PlanResult;
+  if (error instanceof ApiError && error.code === "plan_rechazado" && isPlanResult(error.data)) {
+    return error.data;
   }
   return null;
 }
 
 type Props = {
   week: string;
+  isDisabled?: boolean;
   onChanged: () => void;
 };
 
-export function JefeChat({ week, onChanged }: Props) {
+export function JefeChat({ week, isDisabled = false, onChanged }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [useAi, setUseAi] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
@@ -59,7 +66,7 @@ export function JefeChat({ week, onChanged }: Props) {
       <ChatLog label="Conversación con el Jefe" messages={messages} />
       <div className="row">
         {ACTIONS.map(({ action, label, usesAi }) => (
-          <button key={action} type="button" disabled={isBusy} onClick={() => void run(action, label, usesAi)}>
+          <button key={action} type="button" disabled={isBusy || isDisabled} onClick={() => void run(action, label, usesAi)}>
             {label}
           </button>
         ))}

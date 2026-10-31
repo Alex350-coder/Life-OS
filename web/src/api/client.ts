@@ -1,4 +1,4 @@
-// Cliente de la API local (ADR-0013): misma origen, cookie de sesión HttpOnly y token CSRF en
+// Cliente de la API local (ADR-0013): mismo origen, cookie de sesión HttpOnly y token CSRF en
 // cabecera para todo lo que cambia estado. Nunca guarda tokens en localStorage.
 
 export interface ApiFailure {
@@ -20,25 +20,36 @@ export class ApiError extends Error {
   }
 }
 
-interface Envelope<T> {
-  ok: boolean;
-  data?: T;
+interface Envelope {
+  ok?: unknown;
+  data?: unknown;
   error?: ApiFailure;
 }
 
 const UNREADABLE: ApiFailure = { code: "respuesta", message: "respuesta no válida del servidor" };
 
+// Avisa a la App cuando el servidor dice que no hay sesión (caducó o se reinició).
+const sessionListeners = new Set<() => void>();
+
+export function onSessionLost(listener: () => void): () => void {
+  sessionListeners.add(listener);
+  return () => sessionListeners.delete(listener);
+}
+
 async function parse<T>(response: Response): Promise<T> {
-  let body: Envelope<T> | null = null;
+  let body: unknown = null;
   try {
-    body = (await response.json()) as Envelope<T>;
+    body = await response.json();
   } catch {
     throw new ApiError(response.status, UNREADABLE);
   }
-  if (!response.ok || !body.ok) {
-    throw new ApiError(response.status, body.error ?? UNREADABLE, body.data ?? null);
+  if (typeof body !== "object" || body === null) throw new ApiError(response.status, UNREADABLE);
+  const envelope = body as Envelope;
+  if (!response.ok || envelope.ok !== true) {
+    if (response.status === 401) sessionListeners.forEach((listener) => listener());
+    throw new ApiError(response.status, envelope.error ?? UNREADABLE, envelope.data ?? null);
   }
-  return body.data as T;
+  return envelope.data as T;
 }
 
 let csrfToken: string | null = null;
@@ -66,15 +77,31 @@ export async function get<T>(path: string, params: Record<string, string | numbe
   return parse<T>(await fetch(url, { credentials: "same-origin" }));
 }
 
-export async function post<T>(path: string, body: unknown): Promise<T> {
-  const response = await fetch(path, {
+async function send(path: string, body: unknown): Promise<Response> {
+  return fetch(path, {
     method: "POST",
     credentials: "same-origin",
     headers: { "Content-Type": "application/json", "X-CSRF-Token": await csrf() },
     body: JSON.stringify(body),
   });
-  if (response.status === 204) return undefined as T;
+}
+
+export async function post<T>(path: string, body: unknown): Promise<T> {
+  let response = await send(path, body);
+  if (response.status === 403) {
+    // Otra pestaña abrió una sesión nueva: el token en memoria quedó viejo. Se renueva una vez.
+    const failure = (await response.clone().json().catch(() => null)) as Envelope | null;
+    if (failure?.error?.code === "csrf") {
+      resetSession();
+      response = await send(path, body);
+    }
+  }
   return parse<T>(response);
+}
+
+export async function postVoid(path: string, body: unknown): Promise<void> {
+  const response = await send(path, body);
+  if (response.status !== 204) await parse<unknown>(response);
 }
 
 export async function checkSession(): Promise<boolean> {

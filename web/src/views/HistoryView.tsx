@@ -47,6 +47,7 @@ export function HistoryView() {
                       <td>{entry.action}</td>
                       <td>{entry.target}</td>
                       <td>
+                        {!entry.completed && <strong>⚠ incompleto: </strong>}
                         {RESULT_LABEL[entry.result]}
                         {entry.reason !== null && <span className="muted"> · {entry.reason}</span>}
                       </td>

@@ -10,5 +10,6 @@ setup("el propietario abre la URL de arranque", async ({ page }) => {
   const session = cookies.find((cookie) => cookie.name === "lifeos_session");
   expect(session?.httpOnly).toBe(true);
   expect(session?.sameSite).toBe("Strict");
-  await page.context().storageState({ path: "test-results/.auth/owner.json" });
+  // Fuera de test-results/ (Playwright lo vacía en cada ejecución); ignorado por Git.
+  await page.context().storageState({ path: "playwright/.auth/owner.json" });
 });

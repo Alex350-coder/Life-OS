@@ -52,7 +52,8 @@ export function BlockList({ blocks, empty }: { blocks: PlanBlock[]; empty: strin
 
 export function LoadBar({ load, label }: { load: DayLoad; label: string }) {
   const budget = Math.max(load.budget_minutes, 1);
-  const percent = Math.min(100, Math.round((load.planned_minutes / budget) * 100));
+  // El medidor se llena hasta el límite; el porcentaje leído es el real (puede pasar de 100).
+  const percent = Math.round((load.planned_minutes / budget) * 100);
   return (
     <div className="load">
       <div className="load-head">
@@ -65,8 +66,10 @@ export function LoadBar({ load, label }: { load: DayLoad; label: string }) {
       <meter
         min={0}
         max={budget}
+        high={budget * 0.9}
+        optimum={0}
         value={Math.min(load.planned_minutes, budget)}
-        aria-label={`Carga de ${label}: ${percent} %`}
+        aria-label={`Carga de ${label}: ${percent} % del límite`}
       />
       <p className="muted small">
         Fijo {minutes(load.fixed_minutes)} · Protegido {minutes(load.protected_minutes)} · Libre{" "}

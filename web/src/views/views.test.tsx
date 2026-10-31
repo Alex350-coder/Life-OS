@@ -93,7 +93,7 @@ describe("Hoy", () => {
     await user.selectOptions(screen.getByLabelText("Tarea del bloque"), "t-aaaaaa");
     await user.type(screen.getByLabelText("Mensaje"), "No sé por dónde empezar");
     await user.click(screen.getByRole("button", { name: "Enviar check-in" }));
-    const log = await screen.findByRole("list", { name: "Conversación con el Coach" });
+    const log = await screen.findByRole("log", { name: "Conversación con el Coach" });
     expect(await within(log).findByText("Micro-paso (5 min): Abre el archivo")).toBeInTheDocument();
     const sent = calls.find((c) => c.method === "POST" && c.url === "/api/checkins");
     expect(sent?.body).toEqual({ texto: "No sé por dónde empezar", estado: "bloqueado", tarea: "t-aaaaaa", capturar: null, ia: false });
@@ -140,7 +140,7 @@ describe("Semana y chat con el Jefe", () => {
     const user = userEvent.setup();
     render(<WeekView />);
     await user.click(await screen.findByRole("button", { name: "Aprobar el plan propuesto" }));
-    const log = await screen.findByRole("list", { name: "Conversación con el Jefe" });
+    const log = await screen.findByRole("log", { name: "Conversación con el Jefe" });
     expect(await within(log).findByText("[solapamiento] choca con la clase")).toBeInTheDocument();
     expect(calls.find((c) => c.url === "/api/plan/aprobacion")?.body).toEqual({ semana: null });
   });
@@ -244,7 +244,7 @@ describe("estados menos frecuentes", () => {
     });
     const user = userEvent.setup();
     render(<TodayView />);
-    const [first, second] = await screen.findAllByRole("group");
+    const [first, second] = await screen.findAllByRole("group", { name: /t-/ });
     await user.click(within(first as HTMLElement).getByRole("radio", { name: "Hecha" }));
     await user.click(within(second as HTMLElement).getByRole("radio", { name: "No la hice" }));
     await user.click(screen.getByRole("button", { name: "Ver vista previa" }));

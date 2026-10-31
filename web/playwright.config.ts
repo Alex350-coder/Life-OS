@@ -16,7 +16,7 @@ export default defineConfig({
     { name: "setup", testMatch: /auth\.setup\.ts/ },
     {
       name: "chromium",
-      use: { ...devices["Desktop Chrome"], storageState: "test-results/.auth/owner.json" },
+      use: { ...devices["Desktop Chrome"], storageState: "playwright/.auth/owner.json" },
       dependencies: ["setup"],
       testMatch: /.*\.spec\.ts/,
     },

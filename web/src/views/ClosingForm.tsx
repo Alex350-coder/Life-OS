@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { post } from "../api/client";
 import type { Briefing, ClosingAnswer, ClosingPreview, ClosingResult, TaskChange } from "../api/types";
 import { ErrorBanner } from "../components/common";
@@ -13,10 +13,13 @@ interface Draft {
 
 const EMPTY: Draft = { kind: "", progress: "", remaining: "" };
 
-function answersFrom(drafts: Record<string, Draft>): ClosingAnswer[] {
+const LABELS: Record<Kind, string> = { "": "Sin respuesta", hecha: "Hecha", parcial: "Parcial", no: "No la hice" };
+
+// Solo las tareas que siguen en el plan de hoy: un borrador de una tarea que ya no se ve no se envía.
+function answersFrom(drafts: Record<string, Draft>, visible: ReadonlySet<string>): ClosingAnswer[] {
   const answers: ClosingAnswer[] = [];
   for (const [tarea, draft] of Object.entries(drafts)) {
-    if (draft.kind === "") continue; // sin respuesta: la tarea no cambia
+    if (draft.kind === "" || !visible.has(tarea)) continue; // sin respuesta: la tarea no cambia
     const answer: ClosingAnswer = { tarea, tipo: draft.kind };
     if (draft.kind === "parcial") {
       if (draft.progress.trim() !== "") answer.avance = draft.progress.trim();
@@ -48,6 +51,12 @@ export function ClosingForm({ day, onApplied }: Props) {
   const [applied, setApplied] = useState<ClosingResult | null>(null);
   const [error, setError] = useState<Error | null>(null);
   const [isBusy, setIsBusy] = useState(false);
+  const resultRef = useRef<HTMLParagraphElement>(null);
+  const visible = new Set(tasks.map(([task]) => task));
+
+  useEffect(() => {
+    if (applied !== null) resultRef.current?.focus();
+  }, [applied]);
 
   const update = (task: string, patch: Partial<Draft>) => {
     setPreview(null);
@@ -58,7 +67,7 @@ export function ClosingForm({ day, onApplied }: Props) {
     setIsBusy(true);
     setError(null);
     try {
-      onDone(await post<ClosingResult>(path, { respuestas: answersFrom(drafts) }));
+      onDone(await post<ClosingResult>(path, { respuestas: answersFrom(drafts, visible) }));
     } catch (reason) {
       setError(reason instanceof Error ? reason : new Error(String(reason)));
     } finally {
@@ -75,7 +84,7 @@ export function ClosingForm({ day, onApplied }: Props) {
       </p>
       <ErrorBanner error={error} />
       {applied !== null ? (
-        <p role="status" className="banner banner-ok">
+        <p role="status" className="banner banner-ok" tabIndex={-1} ref={resultRef}>
           Cierre registrado en {applied.written.join(", ")}.
           {applied.adjustments.length > 0 && ` Propuestas de reubicación para el Jefe: ${applied.adjustments.length}.`}
         </p>
@@ -97,7 +106,7 @@ export function ClosingForm({ day, onApplied }: Props) {
                       checked={draft.kind === kind}
                       onChange={() => update(task, { kind })}
                     />
-                    {kind === "" ? "Sin respuesta" : kind === "hecha" ? "Hecha" : kind === "parcial" ? "Parcial" : "No la hice"}
+                    {LABELS[kind]}
                   </label>
                 ))}
                 {draft.kind === "parcial" && (

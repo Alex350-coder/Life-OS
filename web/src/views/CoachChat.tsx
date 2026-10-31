@@ -22,12 +22,14 @@ type Props = {
 export function CoachChat({ work, onRecorded }: Props) {
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [text, setText] = useState("");
-  const [state, setState] = useState<string>("nota");
+  const [state, setState] = useState<(typeof STATES)[number][0]>("nota");
   const [task, setTask] = useState("");
   const [capture, setCapture] = useState("");
   const [useAi, setUseAi] = useState(false);
   const [isSending, setIsSending] = useState(false);
   const tasks = [...new Map(work.filter((b) => b.task_id !== null).map((b) => [b.task_id, b])).values()];
+  // Si la tarea elegida ya no está en el plan (tras recargar), no se envía una tarea oculta.
+  const chosenTask = tasks.some((b) => b.task_id === task) ? task : "";
 
   const say = (author: ChatMessage["author"], lines: string[], isError = false) =>
     setMessages((current) => [...current, { id: current.length + 1, author, lines, isError }]);
@@ -41,7 +43,7 @@ export function CoachChat({ work, onRecorded }: Props) {
       const result = await post<CheckInResult>("/api/checkins", {
         texto: text,
         estado: state,
-        tarea: task === "" ? null : task,
+        tarea: chosenTask === "" ? null : chosenTask,
         capturar: capture.trim() === "" ? null : capture,
         ia: useAi,
       });
@@ -60,10 +62,12 @@ export function CoachChat({ work, onRecorded }: Props) {
     <section aria-labelledby="coach-heading" className="card">
       <h2 id="coach-heading">Chat con el Coach</h2>
       <ChatLog label="Conversación con el Coach" messages={messages} />
-      <form className="chat-form" onSubmit={handleSubmit}>
+      <form onSubmit={handleSubmit}>
+        <fieldset className="chat-form plain" disabled={isSending}>
+          <legend className="visually-hidden">Nuevo check-in</legend>
         <label>
           ¿Cómo vas?
-          <select value={state} onChange={(e) => setState(e.target.value)}>
+          <select value={state} onChange={(e) => setState(e.target.value as (typeof STATES)[number][0])}>
             {STATES.map(([value, label]) => (
               <option key={value} value={value}>
                 {label}
@@ -73,7 +77,7 @@ export function CoachChat({ work, onRecorded }: Props) {
         </label>
         <label>
           Tarea del bloque
-          <select value={task} onChange={(e) => setTask(e.target.value)}>
+          <select value={chosenTask} onChange={(e) => setTask(e.target.value)}>
             <option value="">(ninguna)</option>
             {tasks.map((block) => (
               <option key={block.task_id} value={block.task_id ?? ""}>
@@ -94,9 +98,9 @@ export function CoachChat({ work, onRecorded }: Props) {
           <input type="checkbox" checked={useAi} onChange={(e) => setUseAi(e.target.checked)} />
           Pedir el mensaje al modelo (IA)
         </label>
-        <button type="submit" disabled={isSending}>
-          {isSending ? "Enviando…" : "Enviar check-in"}
-        </button>
+        <button type="submit">Enviar check-in</button>
+        </fieldset>
+        <p role="status" className="muted small">{isSending ? "Enviando…" : ""}</p>
       </form>
     </section>
   );

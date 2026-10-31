@@ -2,7 +2,8 @@ import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
 // Flujo crítico del Hito H2 contra el backend real (bóveda temporal inventada, lunes 07:30).
-// Las pruebas comparten servidor y bóveda: se ejecutan en orden.
+// Las pruebas comparten servidor y bóveda: se ejecutan en orden y cada una parte del estado que
+// deja la anterior. "Cerrar sesión" invalida la cookie compartida: debe ser siempre la última.
 test.describe.configure({ mode: "serial" });
 
 const XSS = "<img src=x onerror=alert(1)>";
@@ -61,7 +62,7 @@ test("el Jefe propone y el propietario aprueba la semana", async ({ page }) => {
   await page.goto("/#semana");
   await expect(page.getByRole("heading", { name: /sin plan/ })).toBeVisible();
   await page.getByRole("button", { name: "Proponer la semana" }).click();
-  const jefe = page.getByRole("list", { name: "Conversación con el Jefe" });
+  const jefe = page.getByRole("log", { name: "Conversación con el Jefe" });
   await expect(jefe).toContainText("Plan propuesto para 2026-W45");
   await expect(page.getByRole("heading", { name: /Semana 2026-W45 · propuesto/ })).toBeVisible();
   await page.getByRole("button", { name: "Aprobar el plan propuesto" }).click();
@@ -76,12 +77,12 @@ test("Hoy muestra el plan y el Coach responde a un bloqueo", async ({ page }) =>
   const problems = failOnDialogsAndCsp(page);
   await page.goto("/#hoy");
   await expect(page.getByRole("heading", { name: /Hoy 2026-11-02 · plan aprobado/ })).toBeVisible();
-  await expect(page.getByText("Siguiente")).toBeVisible();
+  await expect(page.getByText("Siguiente", { exact: true })).toBeVisible();
   await page.getByLabel("¿Cómo vas?").selectOption("bloqueado");
-  await page.getByLabel("Tarea del bloque").selectOption({ index: 1 });
+  await page.getByLabel("Tarea del bloque").selectOption({ label: "Informe de redes (t-aaaaaa)" });
   await page.getByLabel("Mensaje", { exact: true }).fill("No sé por dónde empezar");
   await page.getByRole("button", { name: "Enviar check-in" }).click();
-  const coach = page.getByRole("list", { name: "Conversación con el Coach" });
+  const coach = page.getByRole("log", { name: "Conversación con el Coach" });
   await expect(coach).toContainText("Micro-paso");
   await expect(coach).toContainText("Registrado en Diario/2026-11-02.md");
   await expect(page.getByText(/Check-ins: 1/)).toBeVisible();
@@ -112,6 +113,43 @@ test("el historial muestra las escrituras auditadas y los agentes sus permisos",
   await expect(page.getByRole("heading", { name: /^Coach/ })).toBeVisible();
   await expect(page.getByText(/Dueño del plan global: jefe/)).toBeVisible();
   await expectAccessible(page);
+});
+
+test("proponer con IA sin clave lo explica y no guarda nada", async ({ page }) => {
+  await page.goto("/#semana");
+  await page.getByRole("checkbox", { name: "Proponer con IA" }).check();
+  await page.getByRole("button", { name: "Replanificar desde ahora" }).click();
+  const jefe = page.getByRole("log", { name: "Conversación con el Jefe" });
+  await expect(jefe).toContainText("NVIDIA_API_KEY");
+  await expect(page.getByRole("heading", { name: /Semana 2026-W45 · aprobado/ })).toBeVisible();
+});
+
+test("replanificar deja una revisión propuesta, sin tocar lo aprobado", async ({ page }) => {
+  await page.goto("/#semana");
+  await page.getByRole("button", { name: "Replanificar desde ahora" }).click();
+  await expect(page.getByRole("heading", { name: /revisión 1/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /· propuesto/ })).toBeVisible();
+  await page.getByRole("button", { name: "Aprobar el plan propuesto" }).click();
+  await expect(page.getByRole("heading", { name: /aprobado \(revisión 1\)/ })).toBeVisible();
+});
+
+test("cierre: la vista previa no cambia nada y confirmar lo aplica", async ({ page }) => {
+  const problems = failOnDialogsAndCsp(page);
+  await page.goto("/#hoy");
+  const closing = page.getByRole("region", { name: "Cierre del día" });
+  const confirm = closing.getByRole("button", { name: "Confirmar cierre" });
+  await closing.getByRole("group", { name: /t-aaaaaa/ }).getByRole("radio", { name: "Parcial" }).check();
+  await closing.getByLabel("Avance (%)").fill("60");
+  await expect(confirm).toBeDisabled();
+  await closing.getByRole("button", { name: "Ver vista previa" }).click();
+  await expect(closing.getByRole("status")).toContainText("no se cambió nada");
+  await expect(closing.getByRole("status")).toContainText("avance");
+  await confirm.click();
+  await expect(closing.getByRole("status")).toContainText("Cierre registrado en");
+  await page.getByRole("tab", { name: "Tareas" }).click();
+  await expect(page.getByRole("row").filter({ hasText: "Informe de redes" }).first()).toContainText("60%");
+  await expectAccessible(page);
+  expect(problems).toEqual([]);
 });
 
 test("cerrar sesión invalida la cookie en el servidor", async ({ page }) => {

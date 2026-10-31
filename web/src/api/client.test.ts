@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { fail, installFakeApi, ok } from "../test/fakeApi";
-import { ApiError, checkSession, get, post } from "./client";
+import { ApiError, checkSession, get, post, postVoid } from "./client";
 
 afterEach(() => vi.unstubAllGlobals());
 
@@ -46,6 +46,6 @@ describe("cliente de la API", () => {
 
   it("acepta el 204 sin cuerpo del cierre de sesión", async () => {
     installFakeApi({ "POST /api/logout": { status: 204, body: null } });
-    await expect(post("/api/logout", {})).resolves.toBeUndefined();
+    await expect(postVoid("/api/logout", {})).resolves.toBeUndefined();
   });
 });

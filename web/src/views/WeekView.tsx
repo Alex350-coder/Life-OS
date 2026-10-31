@@ -25,8 +25,8 @@ function Plan({ week }: { week: Week }) {
           const load = week.load[index];
           const blocks = week.blocks.filter((block) => block.day === day);
           return (
-            <article key={day} className="day" aria-label={`${DAY_NAMES[index] ?? ""} ${day}`}>
-              <h3>
+            <article key={day} className="day" aria-labelledby={`day-${day}`}>
+              <h3 id={`day-${day}`}>
                 {DAY_NAMES[index]} <span className="muted">{day}</span>
               </h3>
               {load !== undefined && <LoadBar load={load} label={DAY_NAMES[index] ?? day} />}
@@ -41,12 +41,9 @@ function Plan({ week }: { week: Week }) {
 
 export function WeekView() {
   const [week, setWeek] = useState("");
-  const [version, setVersion] = useState(0);
   const isValid = week === "" || WEEK_PATTERN.test(week);
-  const current = useApi(
-    () => get<Week>("/api/semana", isValid ? { semana: week } : {}),
-    `${isValid ? week : ""}-${version}`,
-  );
+  const shown = isValid ? week : "";
+  const current = useApi(() => get<Week>("/api/semana", { semana: shown }), shown);
 
   return (
     <div className="view">
@@ -57,11 +54,15 @@ export function WeekView() {
           maxLength={8}
           placeholder="2026-W45"
           aria-invalid={!isValid}
+          aria-describedby="week-format"
           onChange={(e) => setWeek(e.target.value.trim())}
         />
       </label>
+      <p id="week-format" className={isValid ? "muted small" : "banner banner-warn"}>
+        Formato AAAA-Wnn, p. ej., 2026-W45.{!isValid && " Corrígelo para ver o planificar esa semana."}
+      </p>
       <ErrorBanner error={current.error} />
-      <JefeChat week={isValid ? week : ""} onChanged={() => setVersion((n) => n + 1)} />
+      <JefeChat week={shown} isDisabled={!isValid} onChanged={current.reload} />
       <Loading loading={current.loading && current.data === null}>
         {current.data !== null && <Plan week={current.data} />}
       </Loading>

@@ -1,4 +1,3 @@
-import { useState } from "react";
 import { get } from "../api/client";
 import type { Briefing } from "../api/types";
 import { useApi } from "../api/useApi";
@@ -47,9 +46,8 @@ function Now({ day }: { day: Briefing }) {
 }
 
 export function TodayView() {
-  const [version, setVersion] = useState(0);
-  const today = useApi(() => get<Briefing>("/api/hoy"), String(version));
-  const refresh = () => setVersion((n) => n + 1);
+  const today = useApi(() => get<Briefing>("/api/hoy"), "hoy");
+  const refresh = today.reload;
 
   return (
     <div className="view">
@@ -58,7 +56,7 @@ export function TodayView() {
         {today.data !== null && <Now day={today.data} />}
       </Loading>
       <CoachChat work={today.data?.work ?? []} onRecorded={refresh} />
-      {today.data !== null && <ClosingForm day={today.data} onApplied={refresh} />}
+      {today.data !== null && <ClosingForm key={today.data.day} day={today.data} onApplied={refresh} />}
     </div>
   );
 }
