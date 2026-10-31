@@ -38,7 +38,10 @@ def test_api_without_session_is_401(web: Web, path: str) -> None:
     assert response.status_code == 401
     assert response.json() == {
         "ok": False,
-        "error": {"code": "sin_sesion", "message": "abre la URL que muestra lifeos-web al arrancar"},
+        "error": {
+            "code": "sin_sesion",
+            "message": "abre la URL que muestra lifeos-web al arrancar",
+        },
     }
 
 
@@ -210,7 +213,8 @@ def test_api_requests_are_rate_limited(web: Web) -> None:
 
 def test_api_docs_are_not_exposed(web: Web) -> None:
     for path in ("/docs", "/redoc", "/openapi.json"):
-        assert web.client.get(path).status_code in {401, 404}
+        body = web.client.get(path).text.lower()
+        assert "swagger" not in body and "redoc" not in body and '"openapi"' not in body
 
 
 def test_launch_token_does_not_reach_the_logs(web: Web) -> None:

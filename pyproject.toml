@@ -26,6 +26,9 @@ build-backend = "uv_build"
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = ["--strict-markers", "--import-mode=importlib", "-m", "not live"]
+# Starlette 1.x recomienda httpx2 para TestClient; httpx sigue funcionando y httpx2 no se ha
+# evaluado todavía (limitación registrada en la Fase 5).
+filterwarnings = ["ignore:Using `httpx` with `starlette.testclient` is deprecated"]
 markers = [
     "unit: pruebas de dominio y reglas puras",
     "integration: pruebas contra una bóveda temporal en disco",
