@@ -6,15 +6,17 @@ el archivo del agente. No hay edición: el ciclo de vida llega en la Fase 8.
 """
 
 from collections.abc import Mapping, Sequence
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 
 from lifeos.application.permissions import EffectivePermissions
-from lifeos.application.usage_report import UsageRow, UsageSummary
+from lifeos.application.tasks import ApplicationError
+from lifeos.application.usage_report import UsageRow, UsageSummary, combine
 from lifeos.ports.config import AgentConfig, ModelCatalog, Policy, WriteGrant
 from lifeos.ports.vault import VaultPath
 
 # Todos los agentes que pasan la validación quedan activos hasta la Fase 8 (RULES E.10).
 ACTIVE = "activo"
+ALL_RITUALS = "todos"
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,22 +65,7 @@ def _grants(grants: Sequence[WriteGrant]) -> tuple[GrantView, ...]:
 
 def _agent_usage(agent_id: str, summary: UsageSummary) -> UsageRow | None:
     rows = [row for row in summary.rows if row.agent == agent_id]
-    if not rows:
-        return None
-    total = rows[0]
-    for row in rows[1:]:
-        total = replace(
-            total,
-            calls=total.calls + row.calls,
-            attempts=total.attempts + row.attempts,
-            errors=total.errors + row.errors,
-            tokens_prompt=total.tokens_prompt + row.tokens_prompt,
-            tokens_completion=total.tokens_completion + row.tokens_completion,
-            tokens_unknown=total.tokens_unknown + row.tokens_unknown,
-            cost_estimated=total.cost_estimated + row.cost_estimated,
-            cost_unknown=total.cost_unknown + row.cost_unknown,
-        )
-    return replace(total, ritual="todos")
+    return combine(rows, agent=agent_id, ritual=ALL_RITUALS) if rows else None
 
 
 def agents_overview(
@@ -91,8 +78,8 @@ def agents_overview(
     agents = []
     for config in sorted(configs, key=lambda c: c.id):
         effective = permissions.get(config.id)
-        if effective is None:  # no validado: no se muestra como si estuviera activo
-            continue
+        if effective is None:  # resolve_effective valida todos o ninguno: es un fallo de cableado
+            raise ApplicationError(f"el agente {config.id} no tiene permisos efectivos validados")
         profile = catalog.profiles[effective.profile]
         agents.append(
             AgentOverview(

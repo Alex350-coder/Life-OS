@@ -6,6 +6,7 @@ destino) se oculta; uno sin resultado se muestra como incompleto, porque la escr
 ocurrir sin quedar auditada.
 """
 
+from collections import defaultdict
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
@@ -61,6 +62,21 @@ def _entry(record: AuditRecord, *, completed: bool) -> ChangeEntry:
     )
 
 
+def _pair(records: list[AuditRecord]) -> list[AuditRecord]:
+    """Cada resultado cierra un intento anterior de la misma clave; los que sobran se muestran."""
+    shown: list[AuditRecord] = []
+    open_attempts: dict[tuple[str, str, str], list[AuditRecord]] = defaultdict(list)
+    for record in sorted(records, key=lambda r: r.ts):
+        key = _key(record)
+        if record.result is AuditResult.INTENTO:
+            open_attempts[key].append(record)
+            continue
+        if open_attempts[key]:
+            open_attempts[key].pop(0)
+        shown.append(record)
+    return shown + [attempt for attempts in open_attempts.values() for attempt in attempts]
+
+
 def recent_changes(
     reader: AuditReader, now: datetime, *, limit: int = DEFAULT_LIMIT
 ) -> ChangeHistory:
@@ -77,11 +93,6 @@ def recent_changes(
         scan = reader.read_month(year, month)
         records += scan.records
         malformed += scan.malformed
-    finished = {_key(r) for r in records if r.result is not AuditResult.INTENTO}
-    entries = [
-        _entry(r, completed=r.result is not AuditResult.INTENTO)
-        for r in records
-        if r.result is not AuditResult.INTENTO or _key(r) not in finished
-    ]
+    entries = [_entry(r, completed=r.result is not AuditResult.INTENTO) for r in _pair(records)]
     entries.sort(key=lambda entry: entry.ts, reverse=True)
     return ChangeHistory(tuple(entries[:limit]), malformed, len(entries) > limit)

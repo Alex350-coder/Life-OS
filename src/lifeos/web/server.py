@@ -57,16 +57,27 @@ def main(
     except STARTUP_OR_VALUE as error:
         print(f"Error de configuración: {printable(str(error))}", file=stderr)
         return EXIT_USAGE
+    config = uvicorn.Config(
+        app, host=LOOPBACK, port=port, access_log=False, server_header=False, log_level="info"
+    )
+    try:
+        # El puerto se abre antes de mostrar el token: si está ocupado, no se muestra nada útil.
+        sock = config.bind_socket()
+    except (OSError, SystemExit) as error:
+        print(f"Error de configuración: no se pudo abrir {LOOPBACK}:{port} ({error})", file=stderr)
+        return EXIT_USAGE
     print(
         f"Life OS web en http://{LOOPBACK}:{port}/\n"
-        f"Abre esta URL (un solo uso, caduca en 5 minutos):\n"
+        "Abre esta URL (un solo uso, caduca en 5 minutos):\n"
         f"  http://{LOOPBACK}:{port}/auth?token={token.value}\n"
         "No la compartas. Ctrl+C para detener.",
         file=stdout,
         flush=True,
     )
     if serve:  # pragma: no cover - arranca el servidor real
-        uvicorn.run(app, host=LOOPBACK, port=port, access_log=False, server_header=False)
+        uvicorn.Server(config).run(sockets=[sock])
+    else:
+        sock.close()
     return EXIT_OK
 
 

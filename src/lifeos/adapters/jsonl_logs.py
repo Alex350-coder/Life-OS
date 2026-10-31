@@ -207,7 +207,10 @@ _AUDIT_TEXT_FIELDS = ("correlation_id", "actor", "action", "target", "result")
 def _utc_stamp(value: object) -> datetime:
     if not isinstance(value, str) or not value.endswith(_UTC_SUFFIX):
         raise ValueError("la hora debe estar en UTC")
-    return datetime.fromisoformat(value.removesuffix(_UTC_SUFFIX)).replace(tzinfo=UTC)
+    stamp = datetime.fromisoformat(value.removesuffix(_UTC_SUFFIX))
+    if stamp.tzinfo is not None:  # "…+05:00Z": desfase y sufijo a la vez es un registro dañado
+        raise ValueError("la hora UTC no lleva otro desfase")
+    return stamp.replace(tzinfo=UTC)
 
 
 def _audit_record(data: object) -> AuditRecord:
@@ -238,19 +241,20 @@ def _read_month[R](
         raise ValueError("el mes debe estar entre 1 y 12")
     path = directory / f"{prefix}-{year:04d}-{month:02d}.jsonl"
     try:
-        text = path.read_text(encoding="utf-8")
+        raw = path.read_bytes()
     except FileNotFoundError:
         return (), 0, 0
     except OSError as error:
         raise LogWriteError(f"no se pudo leer {path.name}: {error.strerror}") from None
     records: list[R] = []
     malformed = 0
-    for line in text.splitlines():
+    # Se decodifica línea a línea: un byte dañado invalida solo su línea, no el mes entero.
+    for line in raw.splitlines():
         if not line.strip():
             continue
         try:
-            records.append(parse(json.loads(line)))
-        except (ValueError, TypeError, RecursionError, ArithmeticError):
+            records.append(parse(json.loads(line.decode("utf-8"))))
+        except (ValueError, TypeError, RecursionError, ArithmeticError):  # incluye Unicode
             malformed += 1
     return tuple(records), malformed, 1
 

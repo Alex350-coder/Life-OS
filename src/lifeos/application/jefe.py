@@ -97,6 +97,7 @@ class PlanOutcome:
     conflicts: tuple[Conflict, ...]
     path: VaultPath | None  # None si se rechazó: no se guardó nada
     status: PlanStatus | None
+    zone: ZoneInfo  # zona del horario con la que se calculó el plan
 
     @property
     def accepted(self) -> bool:
@@ -423,8 +424,12 @@ class JefePlanner:
         try:
             paths = self._tools.publicar_plan(actor, publication)
         except PlanRejectedError as rejected:
-            return PlanOutcome(publication.proposal, rejected.conflicts, None, None)
-        return PlanOutcome(publication.proposal, (), paths[-1], publication.status)
+            return PlanOutcome(
+                publication.proposal, rejected.conflicts, None, None, publication.context.zone
+            )
+        return PlanOutcome(
+            publication.proposal, (), paths[-1], publication.status, publication.context.zone
+        )
 
 
 def _rendered(adjustments: tuple[Adjustment, ...]) -> tuple[str, ...]:

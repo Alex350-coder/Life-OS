@@ -148,18 +148,11 @@ def week(view: WeekView) -> Json:
     }
 
 
-def _own_zone(item: Block) -> ZoneInfo:
-    """Los bloques del plan llevan la zona del horario en su hora de inicio."""
-    zone = item.interval.start.tzinfo
-    return zone if isinstance(zone, ZoneInfo) else ZoneInfo("UTC")
-
-
-def _proposal(proposal: PlanProposal) -> Json:
-    work = sorted(proposal.work_blocks(), key=lambda b: b.interval.start.timestamp())
+def _proposal(proposal: PlanProposal, zone: ZoneInfo) -> Json:
     return {
         "week": proposal.week.render(),
         "origin": str(proposal.origin),
-        "work": [block(item, _own_zone(item)) for item in work],
+        "work": _blocks(proposal.work_blocks(), zone),
         "unplanned": [
             {
                 "task_id": _opt(u.task_id),
@@ -180,7 +173,7 @@ def plan(result: PlanOutcome) -> Json:
         "accepted": result.accepted,
         "status": _opt(result.status),
         "path": _opt(result.path),
-        "proposal": _proposal(result.proposal),
+        "proposal": _proposal(result.proposal, result.zone),
         "conflicts": [
             {
                 "code": str(c.code),

@@ -109,8 +109,8 @@ class Runtime:
     closing: DailyClosing | None  # cierre diario del propietario (con propuestas del Coach)
     usage_reader: UsageReader
     # Configuración validada de los agentes y lector de auditoría (vista de la web, F5-T04).
-    agents: tuple[AgentConfig, ...] = ()
-    audit_reader: AuditReader | None = None
+    agents: tuple[AgentConfig, ...]
+    audit_reader: AuditReader
 
 
 def _provider_secrets(settings: Settings, catalog: ModelCatalog) -> dict[str, Secret]:

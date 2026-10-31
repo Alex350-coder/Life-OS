@@ -5,6 +5,7 @@ autenticación con el token de arranque y los estáticos del frontend compilado.
 acceso envuelve todo, incluidos los estáticos.
 """
 
+import re
 import time
 from pathlib import Path
 from typing import Annotated
@@ -34,21 +35,34 @@ NOT_BUILT = (
 INDEX = "index.html"
 
 
-def _static(app: FastAPI, dist: Path) -> None:
-    root = dist.resolve()
+# Segmento de ruta de un estático: solo nombres simples (sin `\`, `:`, `%`, unidades ni UNC).
+_SEGMENT_RE = re.compile(r"[A-Za-z0-9_-][A-Za-z0-9._-]{0,100}")
+MAX_SEGMENTS = 8
 
-    @app.get("/{path:path}", include_in_schema=False)
+
+def _dist_file(root: Path, path: str) -> Path | None:
+    """Archivo de `dist/` para `path`, validando el texto ANTES de tocar el disco: una ruta UNC
+    (como `//host/share` con barras invertidas) o absoluta haría que Windows intentara
+    conectarse a otro equipo."""
+    parts = path.split("/")
+    if not path or len(parts) > MAX_SEGMENTS or not all(_SEGMENT_RE.fullmatch(p) for p in parts):
+        return None
+    candidate = root.joinpath(*parts)
+    return candidate if candidate.is_file() else None
+
+
+def _static(app: FastAPI, dist: Path) -> None:
+    root = dist.absolute()
+
+    @app.api_route("/{path:path}", methods=["GET", "HEAD"], include_in_schema=False)
     def frontend(path: str) -> Response:
-        if path.startswith("api/"):
+        if path.startswith("api/") or path == "api":
             return fail("no_encontrado", "ruta de la API desconocida", 404)
         index = root / INDEX
         if not index.is_file():
             return PlainTextResponse(NOT_BUILT, status_code=503)
-        candidate = (root / path).resolve() if path else index
-        # Solo archivos dentro de dist/ (sin traversal); cualquier otra ruta es la SPA.
-        if candidate.is_file() and candidate.is_relative_to(root):
-            return FileResponse(candidate)
-        return FileResponse(index)
+        # Un archivo compilado o, para cualquier otra ruta, la SPA.
+        return FileResponse(_dist_file(root, path) or index)
 
 
 def create_app(
@@ -67,7 +81,7 @@ def create_app(
         openapi_url=None,
     )
     sessions = SessionStore(monotonic)
-    app.state.web = WebRuntime(settings, clock=clock)
+    app.state.web = WebRuntime(settings, clock=clock, monotonic=monotonic)
     app.state.sessions = sessions
     install_error_handlers(app)
 

@@ -6,7 +6,7 @@ convierten con los mismos tipos del dominio que usa la CLI, y sus errores salen 
 
 from typing import Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, StrictBool
 
 MAX_TEXT = 2_000
 MAX_SHORT = 40
@@ -26,12 +26,12 @@ class CheckInIn(_Strict):
     estado: str = Field(default="nota", max_length=MAX_SHORT)
     tarea: str | None = Field(default=None, max_length=MAX_SHORT)
     capturar: str | None = Field(default=None, max_length=MAX_TEXT)
-    ia: bool = False
+    ia: StrictBool = False
 
 
 class PlanIn(_Strict):
     semana: str | None = Field(default=None, max_length=MAX_SHORT)
-    ia: bool = False
+    ia: StrictBool = False
 
 
 class ApprovalIn(_Strict):
@@ -47,7 +47,3 @@ class AnswerIn(_Strict):
 
 class ClosingIn(_Strict):
     respuestas: list[AnswerIn] = Field(default_factory=list, max_length=MAX_ANSWERS)
-
-
-class Empty(_Strict):
-    pass

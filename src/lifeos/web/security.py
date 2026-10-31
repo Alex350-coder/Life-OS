@@ -90,8 +90,14 @@ class SessionStore:
             expires=self._clock() + self._ttl_s,
         )
         with self._lock:
+            now = self._clock()
+            self._sessions = {k: s for k, s in self._sessions.items() if s.expires >= now}
             self._sessions[session.id] = session
         return session
+
+    def active(self) -> int:
+        with self._lock:
+            return len(self._sessions)
 
     def get(self, session_id: str | None) -> Session | None:
         if not session_id:

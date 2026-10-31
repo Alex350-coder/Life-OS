@@ -17,7 +17,7 @@ from lifeos.application.agents_overview import agents_overview
 from lifeos.application.capture import capture
 from lifeos.application.history import DEFAULT_LIMIT, MAX_LIMIT, recent_changes
 from lifeos.application.jefe import PlanOutcome
-from lifeos.application.tasks import TaskQuery, query_tasks, upcoming_tasks
+from lifeos.application.tasks import MAX_UPCOMING_DAYS, TaskQuery, query_tasks, upcoming_tasks
 from lifeos.application.usage_report import summarize
 from lifeos.bootstrap import Runtime
 from lifeos.domain.closing import AnswerKind, ClosingAnswer
@@ -31,19 +31,26 @@ from lifeos.domain.weeks import IsoWeek
 from lifeos.web import serialize
 from lifeos.web.errors import fail, ok
 from lifeos.web.middleware import SESSION_SCOPE_KEY
-from lifeos.web.runtime import SetupError, WebRuntime, closing, coach, jefe, vault
+from lifeos.web.runtime import (
+    AI_RATE_LIMIT,
+    WebRuntime,
+    closing,
+    coach,
+    jefe,
+    vault,
+)
 from lifeos.web.schemas import (
     AnswerIn,
     ApprovalIn,
     CaptureIn,
     CheckInIn,
     ClosingIn,
-    Empty,
     PlanIn,
 )
 from lifeos.web.security import SessionStore
 
 WEB_SOURCE = "web"
+__all__ = ["AI_RATE_LIMIT", "router"]
 MAX_QUERY = 200
 _MONTH_RE = re.compile(r"([0-9]{4})-(0[1-9]|1[0-2])")
 
@@ -103,7 +110,7 @@ def session(request: Request) -> JSONResponse:
 
 
 @router.post("/logout", status_code=204)
-def logout(request: Request, _: Empty) -> Response:
+def logout(request: Request) -> Response:
     sessions: SessionStore = request.app.state.sessions
     sessions.revoke(request.scope["state"][SESSION_SCOPE_KEY].id)
     return Response(status_code=204)
@@ -220,7 +227,9 @@ def tareas(
 
 
 @router.get("/tareas/proximas")
-def proximas(request: Request, dias: Annotated[int, Query(ge=1, le=60)] = 14) -> JSONResponse:
+def proximas(
+    request: Request, dias: Annotated[int, Query(ge=1, le=MAX_UPCOMING_DAYS)] = 14
+) -> JSONResponse:
     runtime = _base(request)
     today = coach(runtime).today()
     return ok(serialize.tasks(upcoming_tasks(vault(runtime), today, days=dias)))
@@ -234,8 +243,6 @@ def historial(
     request: Request, limite: Annotated[int, Query(ge=1, le=MAX_LIMIT)] = DEFAULT_LIMIT
 ) -> JSONResponse:
     runtime = _base(request)
-    if runtime.audit_reader is None:
-        raise SetupError("no hay lector de auditoría configurado")
     changes = recent_changes(runtime.audit_reader, runtime.clock.now(), limit=limite)
     return ok(serialize.history(changes))
 
