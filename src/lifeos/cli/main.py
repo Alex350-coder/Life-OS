@@ -8,10 +8,8 @@ Solo traduce argumentos y resultados; las reglas viven en los casos de uso. Cód
 """
 
 import argparse
-import re
 import sys
 from collections.abc import Callable, Mapping, Sequence
-from datetime import UTC
 from pathlib import Path
 from typing import NoReturn, TextIO
 
@@ -24,10 +22,11 @@ from lifeos.application.tools import AuditIncompleteError
 from lifeos.application.usage_report import summarize
 from lifeos.bootstrap import STARTUP_ERRORS, Runtime, Settings, build_runtime
 from lifeos.cli import output
-from lifeos.domain.closing import AnswerKind, ClosingAnswer
+from lifeos.domain.closing import AnswerKind, ClosingAnswer, parse_progress
 from lifeos.domain.coach import CheckInState
 from lifeos.domain.errors import LifeOSError, ValidationError
 from lifeos.domain.ids import TaskId
+from lifeos.domain.months import current_month, parse_month
 from lifeos.domain.plan import PlanOrigin
 from lifeos.domain.task import Area, Effort, Progress, TaskStatus
 from lifeos.domain.text import printable
@@ -41,7 +40,6 @@ EXIT_REFUSED = 1
 EXIT_USAGE = 2
 CLI_SOURCE = "cli"
 DEFAULT_PROJECT_ROOT = Path(__file__).resolve().parents[3]
-_MONTH_RE = re.compile(r"([0-9]{4})-(0[1-9]|1[0-2])")
 
 
 class UsageError(Exception):
@@ -84,7 +82,7 @@ def _pair(text: str) -> tuple[TaskId, str]:
 def _progress(text: str) -> tuple[TaskId, Progress]:
     task, value = _pair(text)
     try:
-        return task, Progress.parse(value if value.endswith("%") else f"{value}%")
+        return task, parse_progress(value)
     except ValidationError as error:
         raise argparse.ArgumentTypeError(error.reason) from None
 
@@ -98,10 +96,10 @@ def _remaining(text: str) -> tuple[TaskId, Effort]:
 
 
 def _month(text: str) -> tuple[int, int]:
-    match = _MONTH_RE.fullmatch(text.strip())
-    if match is None:
-        raise argparse.ArgumentTypeError("formato esperado AAAA-MM (mes 01 a 12)")
-    return int(match[1]), int(match[2])
+    try:
+        return parse_month(text)
+    except ValidationError as error:
+        raise argparse.ArgumentTypeError(error.reason) from None
 
 
 def _daily_commands(commands: "argparse._SubParsersAction[_Parser]") -> None:
@@ -251,8 +249,7 @@ def _cierre(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]
 
 
 def _uso(runtime: Runtime, args: argparse.Namespace) -> tuple[int, list[str]]:
-    now = runtime.clock.now().astimezone(UTC)
-    year, month = args.mes or (now.year, now.month)
+    year, month = args.mes or current_month(runtime.clock.now())
     summary = summarize(runtime.usage_reader.read_month(year, month))
     return EXIT_OK, output.usage(summary, f"{year:04d}-{month:02d}")
 

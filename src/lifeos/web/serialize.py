@@ -78,6 +78,10 @@ def task(item: LocatedTask) -> Json:
     }
 
 
+def capture(path: object) -> Json:
+    return {"path": _text(path)}
+
+
 def tasks(items: Iterable[LocatedTask]) -> list[Json]:
     return [task(item) for item in items]
 
@@ -225,11 +229,11 @@ def history(changes: ChangeHistory) -> Json:
         "entries": [
             {
                 "ts": e.ts.isoformat(),
-                "actor": e.actor,
-                "action": e.action,
-                "target": e.target,
+                "actor": _text(e.actor),
+                "action": _text(e.action),
+                "target": _text(e.target),
                 "result": str(e.result),
-                "reason": e.reason,
+                "reason": _opt(e.reason),
                 "completed": e.completed,
             }
             for e in changes.entries

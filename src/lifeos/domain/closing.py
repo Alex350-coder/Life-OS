@@ -56,6 +56,28 @@ class TaskChange:
     remaining_after: Effort | None
 
 
+def parse_progress(text: str) -> Progress:
+    """Avance escrito por el propietario: `40` o `40%` (CLI y web)."""
+    value = text.strip()
+    return Progress.parse(value if value.endswith("%") else f"{value}%")
+
+
+def answer_from_input(
+    task_id: TaskId, kind: str, progress: str | None = None, remaining: str | None = None
+) -> ClosingAnswer:
+    """Respuesta del cierre a partir de texto (formulario web); las reglas son las de siempre."""
+    try:
+        answer_kind = AnswerKind(kind)
+    except ValueError:
+        raise ValidationError("cierre", kind, "tipo esperado: hecha, parcial o no") from None
+    return ClosingAnswer(
+        task_id,
+        answer_kind,
+        parse_progress(progress) if progress else None,
+        Effort.parse(remaining) if remaining else None,
+    )
+
+
 def check_answers(answers: Iterable[ClosingAnswer]) -> None:
     seen: set[TaskId] = set()
     for answer in answers:

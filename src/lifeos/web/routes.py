@@ -6,8 +6,6 @@ Las mismas órdenes que la CLI: `capturar`, `tareas`, `semana`, `aprobar`, `sema
 historial y agentes).
 """
 
-import re
-from datetime import UTC
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
@@ -20,13 +18,13 @@ from lifeos.application.jefe import PlanOutcome
 from lifeos.application.tasks import MAX_UPCOMING_DAYS, TaskQuery, query_tasks, upcoming_tasks
 from lifeos.application.usage_report import summarize
 from lifeos.bootstrap import Runtime
-from lifeos.domain.closing import AnswerKind, ClosingAnswer
+from lifeos.domain.closing import ClosingAnswer, answer_from_input
 from lifeos.domain.coach import CheckInState
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.ids import TaskId
+from lifeos.domain.months import current_month, parse_month
 from lifeos.domain.plan import PlanOrigin
-from lifeos.domain.task import Area, Effort, Progress, TaskStatus
-from lifeos.domain.text import printable
+from lifeos.domain.task import Area, TaskStatus
 from lifeos.domain.weeks import IsoWeek
 from lifeos.web import serialize
 from lifeos.web.errors import fail, ok
@@ -52,7 +50,6 @@ from lifeos.web.security import SessionStore
 WEB_SOURCE = "web"
 __all__ = ["AI_RATE_LIMIT", "router"]
 MAX_QUERY = 200
-_MONTH_RE = re.compile(r"([0-9]{4})-(0[1-9]|1[0-2])")
 
 router = APIRouter(prefix="/api")
 
@@ -83,13 +80,7 @@ def _task_id(text: str | None) -> TaskId | None:
 
 
 def _month(request: Request, text: str | None) -> tuple[int, int]:
-    if text:
-        match = _MONTH_RE.fullmatch(text)
-        if match is None:
-            raise ValidationError("mes", text, "formato esperado AAAA-MM (mes 01 a 12)")
-        return int(match[1]), int(match[2])
-    now = _base(request).clock.now().astimezone(UTC)
-    return now.year, now.month
+    return parse_month(text) if text else current_month(_base(request).clock.now())
 
 
 def _plan(result: PlanOutcome) -> JSONResponse:
@@ -173,13 +164,7 @@ def checkin(request: Request, body: CheckInIn) -> JSONResponse:
 
 
 def _answer(item: AnswerIn) -> ClosingAnswer:
-    task_id = TaskId(item.tarea)
-    progress = None
-    if item.avance:
-        raw = item.avance if item.avance.endswith("%") else f"{item.avance}%"
-        progress = Progress.parse(raw)
-    remaining = Effort.parse(item.restante) if item.restante else None
-    return ClosingAnswer(task_id, AnswerKind(item.tipo), progress, remaining)
+    return answer_from_input(TaskId(item.tarea), item.tipo, item.avance, item.restante)
 
 
 @router.post("/cierre/vista-previa")
@@ -206,7 +191,7 @@ def capturar(request: Request, body: CaptureIn) -> JSONResponse:
     runtime = web.base
     with web.writing():
         path = capture(vault(runtime), body.texto, now=runtime.clock.now(), source=WEB_SOURCE)
-    return ok({"path": printable(str(path))}, 201)
+    return ok(serialize.capture(path), 201)
 
 
 @router.get("/tareas")
