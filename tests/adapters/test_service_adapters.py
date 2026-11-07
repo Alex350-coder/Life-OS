@@ -114,7 +114,7 @@ def test_state_round_trips_and_starts_empty(tmp_path: Path) -> None:
 def test_corrupt_state_is_an_explicit_error(tmp_path: Path, content: str) -> None:
     path = tmp_path / "rituales.json"
     path.write_text(content, encoding="utf-8")
-    with pytest.raises(StateError, match="rituales.json"):
+    with pytest.raises(StateError, match=r"rituales\.json"):
         JsonRitualState(path).load()
 
 
@@ -132,8 +132,7 @@ def test_save_replaces_the_file_atomically(tmp_path: Path) -> None:
 
 def test_a_second_instance_cannot_take_the_lock(tmp_path: Path) -> None:
     path = tmp_path / "servicio.lock"
-    with ProcessLock(path):
-        with pytest.raises(AlreadyRunningError):
-            ProcessLock(path).acquire()
+    with ProcessLock(path), pytest.raises(AlreadyRunningError):
+        ProcessLock(path).acquire()
     with ProcessLock(path):  # liberado al salir
         pass

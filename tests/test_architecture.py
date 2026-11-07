@@ -27,7 +27,8 @@ THIRD_PARTY = {
     "domain": set(),
     "ports": set(),
     "application": set(),
-    "adapters": {"yaml", "pydantic"},
+    # faster_whisper: extra opcional de transcripción local (ADR-0015).
+    "adapters": {"yaml", "pydantic", "faster_whisper"},
     "cli": set(),
     "web": {"fastapi", "starlette", "pydantic", "uvicorn"},
 }

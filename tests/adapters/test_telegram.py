@@ -19,7 +19,7 @@ from lifeos.ports.notify import NotifyError
 from tests.stub_http import Reply, StubServer
 
 pytestmark = [pytest.mark.integration, pytest.mark.security]
-TOKEN = "123456:ABC-token-de-prueba_xyz"
+TOKEN = "123456:ABC-token-de-prueba_xyz"  # noqa: S105 - token inventado para las pruebas
 
 
 def ok(result: object) -> Reply:
