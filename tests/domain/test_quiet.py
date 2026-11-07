@@ -6,7 +6,13 @@ import pytest
 
 from lifeos.domain.capacity import day_capacity
 from lifeos.domain.horario_note import parse_horario
-from lifeos.domain.quiet import DeliveryKind, QuietWindow, plan_delivery, quiet_windows
+from lifeos.domain.quiet import (
+    DeliveryKind,
+    QuietWindow,
+    is_quiet,
+    plan_delivery,
+    quiet_windows,
+)
 from lifeos.domain.schedule import TimeRange
 from tests.planning_builders import LIMA
 from tests.planning_samples import horario
@@ -88,3 +94,10 @@ def test_windows_mark_soft_and_hard_reasons() -> None:
     assert (True, "fuera de la disponibilidad") in reasons
     assert (False, "Almuerzo") in reasons
     assert (False, "Clases") in reasons
+
+
+def test_is_quiet_covers_hard_and_soft_silence() -> None:
+    quiet = windows()
+    assert is_quiet(at("07:59"), quiet)
+    assert is_quiet(at("13:30"), quiet)
+    assert not is_quiet(at("14:00"), quiet)
