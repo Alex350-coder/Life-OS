@@ -62,6 +62,18 @@ def test_busy_port_fails_before_showing_a_token(tmp_path: Path) -> None:
     assert code == EXIT_USAGE and "token=" not in out and "no se pudo abrir" in err
 
 
+def test_port_held_by_an_old_instance_fails_before_showing_a_token(tmp_path: Path) -> None:
+    # Un lifeos-web anterior (uvicorn abre con SO_REUSEADDR). En Windows, sin uso exclusivo,
+    # el nuevo arrancaba igual y el navegador seguía hablando con el viejo y su otro token.
+    with socket.socket() as old:
+        old.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+        old.bind(("127.0.0.1", 0))
+        old.listen()
+        port = old.getsockname()[1]
+        code, out, err = _run(tmp_path, LIFEOS_WEB_PORT=str(port))
+    assert code == EXIT_USAGE and "token=" not in out and "no se pudo abrir" in err
+
+
 def test_arguments_are_rejected(tmp_path: Path) -> None:
     code, _, err = _run(tmp_path, "--host", "0.0.0.0")  # noqa: S104
     assert code == EXIT_USAGE and "no acepta argumentos" in err
