@@ -243,7 +243,7 @@ def build_runtime(
 
 # --- Servicio de rituales y Telegram (Fase 6, ADR-0014) --------------------------------------
 
-TELEGRAM_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"  # noqa: S105 - nombre de la variable, no el token
+TELEGRAM_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"  # noqa: S105  # nosec B105 - nombre, no el token
 OWNER_CHAT_ENV = "TELEGRAM_OWNER_CHAT_ID"
 TELEGRAM_API_ENV = "LIFEOS_TELEGRAM_API"  # solo para pruebas locales
 STATE_DIR_ENV = "LIFEOS_STATE_DIR"

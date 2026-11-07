@@ -96,6 +96,26 @@ uv run lifeos-web                            # escucha solo en 127.0.0.1:8765 (L
   - `npm run e2e` (Playwright con Chromium). Antes necesita `npx playwright install chromium` y `npm run build`.
   - El E2E arranca `scripts/e2e_server.py`: una bóveda temporal con datos inventados, reloj fijo y token conocido.
 
+## Servicio de rituales y Telegram (Fase 6; ADR-0014 y ADR-0015)
+`lifeos-servicio` corre en este PC: envía el briefing, los recordatorios de bloque, el aviso de cierre y la propuesta semanal a su hora, y recibe capturas por Telegram (texto y notas de voz). Un solo proceso, sin puertos abiertos (long polling).
+
+1. **Bot.** Crea un bot con [@BotFather](https://t.me/BotFather) (`/newbot`) y copia el token a `.env` como `TELEGRAM_BOT_TOKEN=...`. No lo compartas ni lo pegues en ningún otro sitio.
+2. **Tu chat.** Ejecuta `uv run lifeos-servicio --descubrir`, envía `/start` a tu bot y copia el número que aparece a `.env` como `TELEGRAM_OWNER_CHAT_ID=...`.
+3. **Rituales.** Completa `_sistema/rituales.md` en la bóveda (formato en `../docs/specs/rituales-y-notificaciones.md`; plantilla en `../vault-template/_sistema/rituales.md`).
+4. **Voz (opcional).** `uv sync --extra voz` instala faster-whisper. La primera nota de voz descarga el modelo (`small`, unos 460 MB; `LIFEOS_WHISPER_MODEL` admite `tiny`, `base`, `small` o `medium`).
+5. **Prueba.** `uv run lifeos-servicio --una-vez` hace una sola vuelta. Para dejarlo en marcha: `uv run lifeos-servicio` (Ctrl+C para detener).
+6. **Arranque con Windows.** Crea una tarea al iniciar sesión (desde una terminal, una sola vez):
+   ```powershell
+   schtasks /Create /TN "LifeOS servicio" /SC ONLOGON /RL LIMITED /TR "cmd /c cd /d <ruta del proyecto> && uv run lifeos-servicio >> state\servicio.log 2>&1"
+   ```
+   Para quitarla: `schtasks /Delete /TN "LifeOS servicio" /F`.
+
+- **Silencio.** Fuera de tu disponibilidad (`horario.md`) y en `No molestar` no se envía nada. En tiempo protegido y compromisos fijos el aviso espera a que terminen. Lo que no se puede enviar a tiempo se descarta y se registra.
+- **Apagado.** Al encender, los rituales que aún están dentro de su margen se envían (si no estás en silencio); los demás quedan como omitidos.
+- **Bot.** Solo atiende tu `chat_id` (SEC-12): los demás se ignoran sin respuesta y se auditan con una huella, nunca con su contenido. Escribe cualquier texto para capturarlo en `00-Inbox/`; `/hoy` muestra el plan; `/ayuda`, la ayuda. Las notas de voz se guardan como capturas `sin_confirmar`. El bot no aprueba planes ni cambia tareas.
+- **Estado.** `state/rituales.json` guarda qué se envió y `state/servicio.lock` impide dos servicios a la vez. Si `rituales.json` se daña, el servicio lo dice: revísalo o bórralo (puede repetir los avisos de hoy).
+- **Privacidad.** Los mensajes pasan por los servidores de Telegram. El audio se transcribe en este PC y no se guarda.
+
 ## Verificación real del proveedor
 ```bash
 uv run python scripts/smoke_nvidia.py            # perfiles ligero y grande
@@ -115,6 +135,7 @@ Envía un texto fijo sin datos personales y deja un registro en `logs/usage-AAAA
 - `src/lifeos/domain/`: además, reglas del Coach, propuestas de ajuste, cierre y replanificación (`coach.py`, `adjustments.py`, `closing.py`, `replan.py`).
 - `src/lifeos/cli/`: CLI `lifeos` (presentación, sin reglas de negocio).
 - `src/lifeos/web/`: API local FastAPI y guardia de acceso (presentación, sin reglas de negocio; Fase 5). Lecturas nuevas en `application/history.py`, `agents_overview.py`, `tasks.upcoming_tasks`, `JefePlanner.semana` y `domain/load.py`.
+- `src/lifeos/service/`: servicio `lifeos-servicio` (bucle, bot de Telegram; presentación, Fase 6). Rituales en `application/rituals.py`, `domain/rituals.py` y `domain/quiet.py`; adaptadores `telegram.py`, `whisper.py`, `json_state.py` y `process_lock.py`.
 - `web/`: frontend React + TypeScript (Vite); `web/dist/` lo sirve el backend y no se versiona.
 - `src/lifeos/bootstrap.py`: raíz de composición; único módulo que conecta adaptadores con casos de uso.
 - `scripts/`: utilidades manuales (verificación real del proveedor) y el servidor de pruebas E2E.
