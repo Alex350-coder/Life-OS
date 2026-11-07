@@ -65,3 +65,17 @@ def test_capture_rejects_invalid_source(vault: FilesystemVault, source: str) -> 
 def test_capture_requires_timezone_aware_datetime(vault: FilesystemVault) -> None:
     with pytest.raises(ValidationError, match="zona horaria"):
         capture(vault, "algo", now=datetime(2026, 10, 26, 9, 30))
+
+
+def test_unconfirmed_capture_is_marked_in_its_header(vault: FilesystemVault) -> None:
+    # Fase 6 (ADR-0015): una transcripción de voz puede tener errores y se guarda sin confirmar.
+    now = datetime(2026, 11, 9, 14, 0, tzinfo=UTC)
+    path = capture(vault, "comprar cuerdas", now=now, source="telegram-voz", unconfirmed=True)
+    text = vault.read(path).text
+    assert "fuente: telegram-voz\nestado: sin_confirmar\n" in text
+
+
+def test_regular_capture_has_no_confirmation_state(vault: FilesystemVault) -> None:
+    now = datetime(2026, 11, 9, 14, 0, tzinfo=UTC)
+    path = capture(vault, "nota", now=now, source="telegram")
+    assert "estado:" not in vault.read(path).text
