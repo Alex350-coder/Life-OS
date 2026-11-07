@@ -66,6 +66,7 @@ def test_foreign_chat_is_ignored_and_audited_end_to_end(
         clock=service.runtime.clock,
         audit=service.runtime.audit_log,
         transcriber=None,
+        fingerprint_key=service.fingerprint_key,
     )
     stub_server.replies.append(_updates((1, STRANGER, "secreto del intruso")))
     (message,) = service.channel.poll(None, 0)

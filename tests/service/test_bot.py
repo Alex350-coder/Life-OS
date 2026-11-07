@@ -46,6 +46,7 @@ def make_bot(
         clock=clock,
         audit=log,
         transcriber=transcriber,
+        fingerprint_key=b"clave-de-prueba",
     )
     return bot, channel, log
 

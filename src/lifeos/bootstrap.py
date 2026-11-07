@@ -6,6 +6,7 @@ válidos, no se construye nada. La clave del proveedor solo se exige cuando se p
 de modelos.
 """
 
+import hashlib
 import os
 from collections.abc import Mapping
 from contextlib import AbstractContextManager
@@ -261,6 +262,7 @@ class ServiceRuntime:
     rituals: RitualRunner
     transcriber: Transcriber | None
     owner_chat_id: int
+    fingerprint_key: bytes = field(repr=False)  # clave de la huella de SEC-12
     lock: AbstractContextManager[object] = field(repr=False)
 
 
@@ -333,5 +335,7 @@ def build_service(settings: Settings, *, clock: Clock | None = None) -> ServiceR
         rituals=rituals,
         transcriber=FasterWhisperTranscriber(model),
         owner_chat_id=owner,
+        # Derivada del token: secreta, estable y sin otro secreto que guardar.
+        fingerprint_key=hashlib.sha256(b"lifeos-sec12:" + token.reveal().encode()).digest(),
         lock=ProcessLock(state_dir / "servicio.lock"),
     )

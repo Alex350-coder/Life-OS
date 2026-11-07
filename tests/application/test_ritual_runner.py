@@ -230,8 +230,8 @@ def test_failed_send_is_retried_on_the_next_tick(harness: Harness) -> None:
 
 def test_retries_stop_after_the_maximum(harness: Harness) -> None:
     harness.notifier.failures = MAX_ATTEMPTS + 2
-    for minute in range(MAX_ATTEMPTS + 2):
-        harness.tick_at(at(MON, f"09:0{minute}"))
+    for step in range(MAX_ATTEMPTS + 2):  # cada vuelta, tras la espera máxima entre reintentos
+        harness.tick_at(at(MON, "09:00") + timedelta(minutes=10 * step))
     mark = harness.state.marks["briefing:2026-11-02"]
     assert (mark.status, mark.attempts) == (RitualStatus.FALLIDO, MAX_ATTEMPTS)
 

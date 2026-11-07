@@ -28,7 +28,12 @@ class FasterWhisperTranscriber:
                 raise TranscriberUnavailableError(
                     "la transcripción no está instalada: ejecuta 'uv sync --extra voz'"
                 ) from None
-            self._model = WhisperModel(self._size, device="cpu", compute_type="int8")
+            try:
+                self._model = WhisperModel(self._size, device="cpu", compute_type="int8")
+            except Exception as error:  # descarga del modelo, DLL de ctranslate2, disco...
+                raise TranscriptionError(
+                    f"no se pudo cargar el modelo de voz ({type(error).__name__})"
+                ) from None
         return self._model
 
     def transcribe(self, audio: bytes) -> str:

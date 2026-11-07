@@ -13,10 +13,12 @@ from collections.abc import Callable, Mapping, Sequence
 from pathlib import Path
 from typing import Protocol, TextIO
 
+from lifeos.application.rituals import RitualReport
 from lifeos.bootstrap import STARTUP_ERRORS, Settings, build_service, telegram_channel
 from lifeos.domain.errors import LifeOSError
 from lifeos.domain.text import printable
 from lifeos.ports.chat import ChatChannel, IncomingMessage
+from lifeos.ports.state import RitualStatus
 from lifeos.service.bot import OwnerBot
 
 POLL_TIMEOUT_S = 25
@@ -36,7 +38,7 @@ class _Handler(Protocol):
 
 
 class _Rituals(Protocol):
-    def tick(self) -> object: ...
+    def tick(self) -> Sequence[RitualReport]: ...
 
 
 def _stderr(line: str) -> None:
@@ -86,17 +88,22 @@ class ServiceLoop:
                 self._bot.handle(message)
             except LifeOSError as error:
                 self._log(f"mensaje {message.update_id}: {error}")
+            except Exception as error:
+                self._log(f"mensaje {message.update_id}: error inesperado {type(error).__name__}")
 
     def _tick(self) -> None:
         try:
-            self._rituals.tick()
-        except LifeOSError as error:
-            text = str(error)
+            reports = self._rituals.tick()
+        except Exception as error:
+            text = str(error) if isinstance(error, LifeOSError) else type(error).__name__
             if text != self._last_ritual_error:  # el mismo error en cada vuelta se avisa una vez
                 self._log(f"rituales: {text}")
             self._last_ritual_error = text
             return
         self._last_ritual_error = None
+        for report in reports:
+            if report.status is RitualStatus.FALLIDO:
+                self._log(f"ritual {report.key} falló: {report.reason}")
 
 
 def _discover(channel: ChatChannel, out: TextIO) -> int:
@@ -150,18 +157,25 @@ def main(
         clock=service.runtime.clock,
         audit=service.runtime.audit_log,
         transcriber=service.transcriber,
+        fingerprint_key=service.fingerprint_key,
     )
     try:
-        with service.lock:
-            print("lifeos-servicio en marcha. Ctrl+C para detener.", file=stdout, flush=True)
-            ServiceLoop(service.channel, bot, service.rituals).run(
-                iterations=1 if args.una_vez else None
-            )
-    except KeyboardInterrupt:  # pragma: no cover - parada manual
-        return EXIT_OK
-    except LifeOSError as error:
+        service.lock.__enter__()
+    except LifeOSError as error:  # otro servicio en marcha
         _stderr(f"Error: {error}")
         return EXIT_RUNNING
+    except OSError as error:
+        _stderr(f"Error de configuración: no se pudo crear el candado ({type(error).__name__})")
+        return EXIT_CONFIG
+    try:
+        print("lifeos-servicio en marcha. Ctrl+C para detener.", file=stdout, flush=True)
+        ServiceLoop(service.channel, bot, service.rituals).run(
+            iterations=1 if args.una_vez else None
+        )
+    except KeyboardInterrupt:  # pragma: no cover - parada manual
+        pass
+    finally:
+        service.lock.__exit__(None, None, None)
     return EXIT_OK
 
 

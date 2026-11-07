@@ -4,6 +4,7 @@ from dataclasses import dataclass, field
 
 import pytest
 
+from lifeos.application.rituals import RitualReport
 from lifeos.application.tasks import ApplicationError
 from lifeos.ports.chat import ChatError, IncomingMessage
 from lifeos.service.main import BACKOFF_MAX_S, BACKOFF_START_S, ServiceLoop
@@ -28,7 +29,7 @@ class FakeRituals:
     ticks: int = 0
     error: Exception | None = None
 
-    def tick(self) -> object:
+    def tick(self) -> tuple[RitualReport, ...]:
         self.ticks += 1
         if self.error is not None:
             raise self.error

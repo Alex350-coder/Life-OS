@@ -7,7 +7,9 @@ planes ni cambia tareas.
 """
 
 import hashlib
+import hmac
 import uuid
+from datetime import datetime, timedelta
 
 from lifeos.application import ritual_messages as messages
 from lifeos.application.capture import capture
@@ -23,6 +25,8 @@ MAX_VOICE_SECONDS = 300
 TEXT_SOURCE = "telegram"
 VOICE_SOURCE = "telegram-voz"
 PREVIEW_CHARS = 500
+REJECTION_AUDIT_EVERY = timedelta(hours=1)
+MAX_TRACKED_CHATS = 1000
 HELP = (
     "Life OS\n"
     "• Escribe cualquier cosa y la guardo en tu Inbox.\n"
@@ -35,9 +39,10 @@ _CAPTURE_COMMAND = "/captura"
 _NOTHING_SAVED = "no guardé nada"
 
 
-def chat_fingerprint(chat_id: int) -> str:
-    """Huella corta del chat para la auditoría: permite agrupar intentos sin guardar el id."""
-    return hashlib.sha256(str(chat_id).encode("ascii")).hexdigest()[:12]
+def chat_fingerprint(chat_id: int, key: bytes) -> str:
+    """Huella del chat para la auditoría: agrupa intentos sin guardar el id. Lleva clave (HMAC):
+    un hash simple de un número de ~10 cifras se invertiría por fuerza bruta en segundos."""
+    return hmac.new(key, str(chat_id).encode("ascii"), hashlib.sha256).hexdigest()[:16]
 
 
 class OwnerBot:
@@ -51,7 +56,10 @@ class OwnerBot:
         clock: Clock,
         audit: AuditLog,
         transcriber: Transcriber | None,
+        fingerprint_key: bytes,
     ) -> None:
+        if not fingerprint_key:
+            raise ValueError("la huella de SEC-12 necesita una clave")
         self._channel = channel
         self._owner = owner_chat_id
         self._vault = vault
@@ -59,6 +67,8 @@ class OwnerBot:
         self._clock = clock
         self._audit = audit
         self._transcriber = transcriber
+        self._key = fingerprint_key
+        self._last_rejection: dict[str, datetime] = {}
 
     def handle(self, message: IncomingMessage) -> None:
         if message.chat_id is None:
@@ -76,13 +86,22 @@ class OwnerBot:
     # --- SEC-12 ---------------------------------------------------------------------------------
 
     def _reject(self, chat_id: int) -> None:
+        # Un registro por chat ajeno y hora: el spam de un desconocido no llena la auditoría.
+        fingerprint = chat_fingerprint(chat_id, self._key)
+        now = self._clock.now()
+        last = self._last_rejection.get(fingerprint)
+        if last is not None and now - last < REJECTION_AUDIT_EVERY:
+            return
+        if len(self._last_rejection) >= MAX_TRACKED_CHATS:
+            self._last_rejection.clear()
+        self._last_rejection[fingerprint] = now
         self._audit.append(
             AuditRecord(
-                ts=self._clock.now(),
+                ts=now,
                 correlation_id=uuid.uuid4().hex,
                 actor="telegram",
                 action="mensaje_ajeno",
-                target=f"chat:{chat_fingerprint(chat_id)}",
+                target=f"chat:{fingerprint}",
                 result=AuditResult.RECHAZADO,
                 reason="chat_id ajeno (SEC-12)",
             )
@@ -112,6 +131,8 @@ class OwnerBot:
             return messages.briefing(self._coach.briefing())
         except NoDailyPlanError:
             return messages.no_plan(self._coach.today())
+        except LifeOSError as error:  # horario o nota del día ilegibles: se responde igual
+            return f"No pude leer el plan: {error}"
 
     def _capture(self, text: str, *, source: str, unconfirmed: bool = False) -> str:
         try:
@@ -120,6 +141,8 @@ class OwnerBot:
             )
         except ValidationError as error:
             return f"No pude guardarlo: {error.reason}."
+        except LifeOSError as error:  # bóveda bloqueada, disco lleno...: el propietario lo sabe
+            return f"No pude guardarlo ({error}); vuelve a enviarlo más tarde."
         state = " sin confirmar" if unconfirmed else ""
         return f"Guardado{state} en {path}."
 

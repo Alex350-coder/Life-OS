@@ -63,8 +63,13 @@ def test_deferral_past_the_deadline_is_dropped() -> None:
     assert delivery.reason == "fuera de plazo"
 
 
-def test_sleep_outside_availability_is_hard_silence() -> None:
+def test_sleep_outside_availability_waits_for_availability_within_the_deadline() -> None:
     delivery = plan_delivery(at("07:30"), at("10:00"), windows())
+    assert (delivery.kind, delivery.at) == (DeliveryKind.APLAZAR, at("08:00"))
+
+
+def test_sleep_past_the_deadline_is_dropped() -> None:
+    delivery = plan_delivery(at("07:30"), at("07:50"), windows())
     assert delivery.kind is DeliveryKind.DESCARTAR
     assert delivery.reason == "fuera de la disponibilidad"
 

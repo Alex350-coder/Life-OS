@@ -1,13 +1,14 @@
 """Ejecutor de rituales (F6-T01, F6-T02; ADR-0014, spec rituales-y-notificaciones).
 
 En cada vuelta revisa las ocurrencias de ayer y de hoy. Una ocurrencia se ejecuta una sola vez:
-cuando llega su hora (o el final del silencio blando que la aplaza) y el propietario no está en
-silencio. Pasado su margen se omite. Todo resultado se audita y se guarda en el estado antes de
-seguir, para que un reinicio no repita lo ya enviado.
+cuando llega su hora (o el final del silencio que la aplaza) y el propietario no está en
+silencio. Pasado su margen se omite. Cada resultado se marca primero en memoria y después se
+guarda en el estado y se audita: si el disco falla, lo ya enviado no se repite en este proceso y
+el fallo se informa al terminar la vuelta, después de atender las demás ocurrencias.
 """
 
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import date, datetime, timedelta
 
 from lifeos.application import ritual_messages as messages
@@ -37,11 +38,14 @@ from lifeos.ports.notify import Notifier
 from lifeos.ports.state import RitualMark, RitualStateStore, RitualStatus
 from lifeos.ports.vault import NoteNotFoundError, VaultPath, VaultStore
 
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 5
+# Espera antes de cada reintento (unos 15 min en total): un corte breve no agota los intentos.
+RETRY_DELAYS = tuple(timedelta(minutes=m) for m in (1, 2, 4, 8))
 STATE_RETENTION = timedelta(days=7)
 SYSTEM_ACTOR = "sistema"
 AUDIT_ACTION = "ritual"
 SKIPPED_REASON = "omitido: fuera de su margen"
+_AUDIT_RESULT = {RitualStatus.HECHO: AuditResult.OK, RitualStatus.FALLIDO: AuditResult.ERROR}
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,8 +62,19 @@ class _Day:
     occurrences: tuple[Occurrence, ...]
 
 
-def _retryable(mark: RitualMark) -> bool:
-    return mark.status is RitualStatus.FALLIDO and mark.attempts < MAX_ATTEMPTS
+@dataclass(slots=True)
+class _Turn:
+    now: datetime
+    marks: dict[str, RitualMark]
+    now_windows: tuple[QuietWindow, ...]
+    failures: list[LifeOSError] = field(default_factory=list)
+
+
+def _retryable(mark: RitualMark, now: datetime) -> bool:
+    if mark.status is not RitualStatus.FALLIDO or mark.attempts >= MAX_ATTEMPTS:
+        return False
+    delay = RETRY_DELAYS[min(max(mark.attempts, 1), len(RETRY_DELAYS)) - 1]
+    return now >= mark.updated + delay
 
 
 class RitualRunner:
@@ -83,6 +98,7 @@ class RitualRunner:
         self._audit = audit
         self._clock = clock
         self._configured_zone = configured_zone
+        self._memory: dict[str, RitualMark] = {}  # marcas de este proceso (ver docstring)
 
     # --- Lectura de la configuración ----------------------------------------------------------
 
@@ -104,7 +120,9 @@ class RitualRunner:
     def _work_blocks(self, day: date) -> tuple[Block, ...]:
         try:
             briefing = self._coach.briefing(day)
-        except NoDailyPlanError:
+        except LifeOSError:
+            # Sin plan o con la nota ilegible no hay recordatorios; los demás rituales siguen y el
+            # briefing explicará el problema.
             return ()
         return briefing.work if briefing.approved and briefing.readable else ()
 
@@ -125,80 +143,88 @@ class RitualRunner:
         today = now.astimezone(schedule.zone).date()
         current = self._day(schedule, config, today, today=True)
         previous = self._day(schedule, config, today - timedelta(days=1), today=False)
-        marks = dict(self._state.load())
-        reports: list[RitualReport] = []
-        for day in (previous, current):
-            for occurrence in day.occurrences:
-                report = self._step(occurrence, day.windows, current.windows, marks, now)
-                if report is not None:
-                    reports.append(report)
-        kept = {key: mark for key, mark in marks.items() if mark.updated >= now - STATE_RETENTION}
-        if kept.keys() != marks.keys():
-            self._state.save(kept)
+        turn = _Turn(now, {**self._state.load(), **self._memory}, current.windows)
+        reports = [
+            report
+            for day in (previous, current)
+            for occurrence in day.occurrences
+            if (report := self._step(occurrence, day.windows, turn)) is not None
+        ]
+        self._prune(turn)
+        if turn.failures:  # las demás ocurrencias ya se atendieron: se informa el primer fallo
+            raise turn.failures[0]
         return tuple(reports)
 
+    def _prune(self, turn: _Turn) -> None:
+        limit = turn.now - STATE_RETENTION
+        kept = {key: mark for key, mark in turn.marks.items() if mark.updated >= limit}
+        self._memory = {key: mark for key, mark in self._memory.items() if key in kept}
+        if kept.keys() != turn.marks.keys():
+            try:
+                self._state.save(kept)
+            except LifeOSError as error:
+                turn.failures.append(error)
+
     def _step(
-        self,
-        occurrence: Occurrence,
-        windows: tuple[QuietWindow, ...],
-        now_windows: tuple[QuietWindow, ...],
-        marks: dict[str, RitualMark],
-        now: datetime,
+        self, occurrence: Occurrence, windows: tuple[QuietWindow, ...], turn: _Turn
     ) -> RitualReport | None:
-        mark = marks.get(occurrence.key)
-        if mark is not None and not _retryable(mark):
+        mark = turn.marks.get(occurrence.key)
+        if mark is not None and not _retryable(mark, turn.now):
             return None
-        if now < occurrence.at:
+        if turn.now < occurrence.at:
             return None
-        if now > occurrence.deadline:
-            return self._finish(occurrence, RitualStatus.OMITIDO, SKIPPED_REASON, marks, now)
         delivery = plan_delivery(occurrence.at, occurrence.deadline, windows)
         if delivery.kind is DeliveryKind.DESCARTAR:
             reason = f"descartado: {delivery.reason}"
-            return self._finish(occurrence, RitualStatus.DESCARTADO, reason, marks, now)
-        if delivery.at is None or now < delivery.at or is_quiet(now, now_windows):
+            return self._record(occurrence, RitualStatus.DESCARTADO, reason, turn)
+        if turn.now > occurrence.deadline:
+            return self._record(occurrence, RitualStatus.OMITIDO, SKIPPED_REASON, turn)
+        if delivery.at is None or turn.now < delivery.at or is_quiet(turn.now, turn.now_windows):
             return None  # aplazado, o recuperación tardía mientras el propietario descansa
         attempts = (mark.attempts if mark else 0) + 1
         try:
-            text = self._compose(occurrence)
+            text = self._compose(occurrence, retry=mark is not None)
             if text is not None:
                 self._notifier.send(text)
         except LifeOSError as error:
             reason = f"{type(error).__name__}: {error}"
-            return self._finish(occurrence, RitualStatus.FALLIDO, reason, marks, now, attempts)
-        return self._finish(occurrence, RitualStatus.HECHO, None, marks, now, attempts)
+            return self._record(occurrence, RitualStatus.FALLIDO, reason, turn, attempts)
+        return self._record(occurrence, RitualStatus.HECHO, None, turn, attempts)
 
-    def _finish(
+    def _record(
         self,
         occurrence: Occurrence,
         status: RitualStatus,
         reason: str | None,
-        marks: dict[str, RitualMark],
-        now: datetime,
+        turn: _Turn,
         attempts: int = 0,
     ) -> RitualReport:
-        result = {
-            RitualStatus.HECHO: AuditResult.OK,
-            RitualStatus.FALLIDO: AuditResult.ERROR,
-        }.get(status, AuditResult.RECHAZADO)
-        self._audit.append(
-            AuditRecord(
-                ts=now,
-                correlation_id=uuid.uuid4().hex,
-                actor=SYSTEM_ACTOR,
-                action=AUDIT_ACTION,
-                target=occurrence.key,
-                result=result,
-                reason=reason,
+        mark = RitualMark(status, attempts, turn.now, reason)
+        turn.marks[occurrence.key] = mark
+        self._memory[occurrence.key] = mark  # primero en memoria: nada se repite en este proceso
+        try:
+            self._state.save(turn.marks)
+        except LifeOSError as error:
+            turn.failures.append(error)
+        try:
+            self._audit.append(
+                AuditRecord(
+                    ts=turn.now,
+                    correlation_id=uuid.uuid4().hex,
+                    actor=SYSTEM_ACTOR,
+                    action=AUDIT_ACTION,
+                    target=occurrence.key,
+                    result=_AUDIT_RESULT.get(status, AuditResult.RECHAZADO),
+                    reason=reason,
+                )
             )
-        )
-        marks[occurrence.key] = RitualMark(status, attempts, now, reason)
-        self._state.save(marks)  # antes de seguir: un reinicio no repite lo ya enviado
+        except LifeOSError as error:
+            turn.failures.append(error)
         return RitualReport(occurrence.key, status, reason)
 
     # --- Acciones -----------------------------------------------------------------------------
 
-    def _compose(self, occurrence: Occurrence) -> str | None:
+    def _compose(self, occurrence: Occurrence, *, retry: bool) -> str | None:
         match occurrence.kind:
             case RitualKind.BRIEFING:
                 try:
@@ -212,10 +238,12 @@ class RitualRunner:
                     return None
                 return messages.reminder(occurrence.block, occurrence.at.tzinfo)
             case RitualKind.PROPUESTA_SEMANAL:
-                return self._weekly_proposal(occurrence.day)
+                return self._weekly_proposal(occurrence.day, retry=retry)
 
-    def _weekly_proposal(self, day: date) -> str | None:
+    def _weekly_proposal(self, day: date, *, retry: bool) -> str | None:
         week = IsoWeek.containing(day + timedelta(days=1))
         if self._vault.exists(VaultPath.parse(weekly_path(week))):
-            return None  # ya hay plan (propuesto o aprobado): no se toca
+            # Si este ritual ya la propuso y falló el aviso, se avisa del plan existente. Si el plan
+            # viene de otro lado (propietario, web), no se toca ni se avisa.
+            return messages.existing_proposal(self._jefe.semana(week)) if retry else None
         return messages.proposal(week, self._jefe.proponer(week))

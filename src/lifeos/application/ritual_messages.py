@@ -6,7 +6,7 @@ Los títulos de bloques y tareas son datos de la bóveda: se muestran tal cual, 
 from datetime import date, tzinfo
 
 from lifeos.application.coach import Briefing
-from lifeos.application.jefe import PlanOutcome
+from lifeos.application.jefe import PlanOutcome, WeekView
 from lifeos.domain.plan import Block, BlockKind
 from lifeos.domain.weeks import IsoWeek
 
@@ -63,3 +63,12 @@ def proposal(week: IsoWeek, outcome: PlanOutcome) -> str:
         lines.append(f"No caben {len(outcome.proposal.unplanned)} tarea(s); se proponen aplazar.")
     lines.append("Revísalo y, si te sirve, aprueba el plan en la web o con 'lifeos aprobar'.")
     return "\n".join(lines)
+
+
+def existing_proposal(view: WeekView) -> str:
+    work = sum(1 for b in view.blocks if b.kind is BlockKind.TRABAJO)
+    state = view.status.value if view.status else "sin estado"
+    return (
+        f"Plan de {view.week.render()} ({state}): {work} bloque(s) de trabajo.\n"
+        "Revísalo y, si te sirve, aprueba el plan en la web o con 'lifeos aprobar'."
+    )

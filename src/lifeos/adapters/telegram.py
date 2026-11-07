@@ -27,8 +27,9 @@ MAX_MESSAGE_CHARS = 4096
 REQUEST_MARGIN_S = 10  # margen sobre el long polling antes de dar la conexión por perdida
 SEND_TIMEOUT_S = 20
 _CHUNK_BYTES = 64 * 1024
+OFFICIAL_HOST = "api.telegram.org"
 _LOOPBACK = "127.0.0.1"
-_TOKEN_RE = re.compile(r"\d{1,20}:[A-Za-z0-9_-]{10,100}")
+_TOKEN_RE = re.compile(r"\d{1,20}:[A-Za-z0-9_-]{10,100}", re.ASCII)
 _FILE_PATH_RE = re.compile(r"[A-Za-z0-9_-]{1,64}(/[A-Za-z0-9_.-]{1,128}){0,3}")
 
 
@@ -46,32 +47,57 @@ class _NoRedirect(urllib.request.HTTPRedirectHandler):
 
 
 def _check_base_url(base_url: str) -> str:
+    # El token viaja en la ruta: solo puede ir al host oficial (o a 127.0.0.1 en pruebas).
     parts = urlsplit(base_url)
-    secure = parts.scheme == "https" and bool(parts.hostname)
+    official = parts.scheme == "https" and parts.hostname == OFFICIAL_HOST
     loopback = parts.scheme == "http" and parts.hostname == _LOOPBACK
-    if not (secure or loopback):
-        raise ValueError("Telegram debe usar https (http solo hacia 127.0.0.1 en pruebas)")
+    if not (official or loopback):
+        raise ValueError(
+            f"Telegram debe usar https://{OFFICIAL_HOST} (http solo hacia 127.0.0.1 en pruebas)"
+        )
     return base_url.rstrip("/")
 
 
+def _units(text: str) -> int:
+    """Longitud según Telegram: unidades UTF-16 (un emoji puede contar 2)."""
+    return len(text.encode("utf-16-le")) // 2
+
+
+def _pieces(line: str) -> list[str]:
+    """Una línea en trozos que caben en un mensaje, sin partir caracteres."""
+    pieces: list[str] = []
+    current: list[str] = []
+    size = 0
+    for char in line:
+        width = _units(char)
+        if size + width > MAX_MESSAGE_CHARS:
+            pieces.append("".join(current))
+            current, size = [], 0
+        current.append(char)
+        size += width
+    pieces.append("".join(current))
+    return pieces
+
+
 def _split(text: str) -> list[str]:
-    """Trozos de como mucho MAX_MESSAGE_CHARS, cortando por líneas cuando se puede."""
+    """Mensajes de como mucho MAX_MESSAGE_CHARS, cortando por líneas cuando se puede. Un texto
+    vacío no produce mensajes (Telegram rechaza los vacíos)."""
+    if not text:
+        return []
     chunks: list[str] = []
-    current = ""
+    current: str | None = None
     for line in text.split("\n"):
-        while len(line) > MAX_MESSAGE_CHARS:
-            if current:
-                chunks.append(current)
-                current = ""
-            chunks.append(line[:MAX_MESSAGE_CHARS])
-            line = line[MAX_MESSAGE_CHARS:]
-        candidate = f"{current}\n{line}" if current else line
-        if len(candidate) > MAX_MESSAGE_CHARS:
-            chunks.append(current)
-            current = line
+        first, *rest = _pieces(line)
+        if current is not None and _units(current) + 1 + _units(first) <= MAX_MESSAGE_CHARS:
+            current = f"{current}\n{first}"
         else:
-            current = candidate
-    if current or not chunks:
+            if current is not None:
+                chunks.append(current)
+            current = first
+        for piece in rest:  # continuación de una línea larga: sin salto de línea añadido
+            chunks.append(current)
+            current = piece
+    if current is not None:
         chunks.append(current)
     return chunks
 
@@ -91,20 +117,21 @@ def _voice(raw: object) -> VoiceNote | None:
 
 def _message(raw: object) -> IncomingMessage:
     if not isinstance(raw, dict) or _int(raw.get("update_id")) is None:
+        # Sin update_id no se puede avanzar el offset: el lote entero es inválido.
         raise ChatError("Telegram envió una actualización sin update_id")
     update_id = raw["update_id"]
     message = raw.get("message")
     if not isinstance(message, dict):
         return IncomingMessage(update_id, None, None, None)
+    try:
+        voice = _voice(message.get("voice"))
+    except ChatError:
+        # Una nota mal formada no bloquea el lote: se devuelve vacía para que el offset avance.
+        return IncomingMessage(update_id, None, None, None)
     chat = message.get("chat")
     chat_id = _int(chat.get("id")) if isinstance(chat, dict) else None
     text = message.get("text")
-    return IncomingMessage(
-        update_id,
-        chat_id,
-        text if isinstance(text, str) else None,
-        _voice(message.get("voice")),
-    )
+    return IncomingMessage(update_id, chat_id, text if isinstance(text, str) else None, voice)
 
 
 class TelegramBotClient:

@@ -1,10 +1,12 @@
 """Regresiones de la revisión de la Fase 6 (python-reviewer, security-reviewer y
 silent-failure-hunter). Cada prueba reproduce un hallazgo antes de corregirlo."""
 
+import contextlib
 import hashlib
 import json
 import sys
 import types
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 from datetime import date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -16,6 +18,7 @@ from lifeos.adapters.secrets import Secret
 from lifeos.adapters.telegram import MAX_MESSAGE_CHARS, TelegramBotClient, _split
 from lifeos.adapters.whisper import FasterWhisperTranscriber
 from lifeos.application.coach import CoachSession
+from lifeos.application.rituals import RitualReport
 from lifeos.application.tools import ToolRegistry
 from lifeos.domain.capacity import day_capacity
 from lifeos.domain.horario_note import parse_horario
@@ -51,19 +54,19 @@ KEY = b"clave-local-de-prueba"
 class FlakyState(MemoryState):
     fail_saves: int = 0
 
-    def save(self, marks: object) -> None:  # type: ignore[override]
+    def save(self, marks: Mapping[str, RitualMark]) -> None:
         if self.fail_saves:
             self.fail_saves -= 1
             raise StateError("rituales.json bloqueado por OneDrive")
-        super().save(marks)  # type: ignore[arg-type]
+        super().save(marks)
 
 
 def test_state_save_failure_after_sending_never_resends(harness: Harness) -> None:
     flaky = FlakyState(fail_saves=100)
-    harness.runner._state = flaky  # type: ignore[attr-defined]  (sustituye el doble)
+    harness.runner._state = flaky
     for minute in range(5):
         harness.clock.current = at(MON, f"09:0{minute}")
-        with pytest.raises(StateError):
+        with contextlib.suppress(StateError):  # el fallo se informa, pero no repite el envío
             harness.runner.tick()
     assert len([m for m in harness.notifier.sent if "Plan de hoy" in m]) == 1
 
@@ -72,7 +75,7 @@ def test_audit_failure_after_sending_never_resends(harness: Harness) -> None:
     harness.audit.fail_on = AuditResult.OK
     for minute in range(3):
         harness.clock.current = at(MON, f"09:0{minute}")
-        with pytest.raises(LogWriteError):
+        with contextlib.suppress(LogWriteError):  # el fallo se informa, pero no repite el envío
             harness.runner.tick()
     assert len([m for m in harness.notifier.sent if "Plan de hoy" in m]) == 1
 
@@ -164,7 +167,7 @@ def test_split_measures_utf16_keeps_blank_lines_and_skips_empty_text() -> None:
 
 
 def test_telegram_base_url_must_be_the_official_host_or_loopback() -> None:
-    with pytest.raises(ValueError, match="api.telegram.org"):
+    with pytest.raises(ValueError, match=r"api\.telegram\.org"):
         TelegramBotClient(Secret(TOKEN), base_url="https://telegram.example.org")
 
 
@@ -261,10 +264,10 @@ class ExplodingBot:
 
 @dataclass
 class ReportingRituals:
-    reports: tuple[object, ...] = ()
+    reports: tuple[RitualReport, ...] = ()
     explode: bool = False
 
-    def tick(self) -> tuple[object, ...]:
+    def tick(self) -> tuple[RitualReport, ...]:
         if self.explode:
             raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "byte inválido")
         return self.reports
@@ -272,7 +275,7 @@ class ReportingRituals:
 
 def test_unexpected_exceptions_never_kill_the_loop() -> None:
     channel = FakeChannel(batches=[(text(1, "a"), text(2, "b"))])
-    bot, logs = ExplodingBot(), []
+    bot, logs = ExplodingBot(), list[str]()
     rituals = ReportingRituals(explode=True)
     ServiceLoop(channel, bot, rituals, sleep=lambda s: None, log=logs.append).run(iterations=2)
     assert bot.handled == [1, 2]
@@ -281,8 +284,6 @@ def test_unexpected_exceptions_never_kill_the_loop() -> None:
 
 
 def test_failed_rituals_are_reported_on_stderr() -> None:
-    from lifeos.application.rituals import RitualReport
-
     report = RitualReport("briefing:2026-11-09", RitualStatus.FALLIDO, "NotifyError: caído")
     logs: list[str] = []
     ServiceLoop(

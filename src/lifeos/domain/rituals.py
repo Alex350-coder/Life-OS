@@ -183,7 +183,10 @@ def parse_rituales(text: str) -> RitualConfig:
 def ritual_occurrences(config: RitualConfig, day: date, zone: tzinfo) -> tuple[Occurrence, ...]:
     occurrences = []
     for rule in config.timed_for(day):
-        moment = local_datetime(day, rule.minute, zone)
+        try:
+            moment = local_datetime(day, rule.minute, zone)
+        except ValidationError:
+            continue  # la hora no existe o es ambigua ese día por el cambio de horario
         occurrences.append(
             Occurrence(
                 kind=rule.kind,
