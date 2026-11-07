@@ -3,10 +3,10 @@
 from dataclasses import dataclass, field
 
 import pytest
-from lifeos.service.main import BACKOFF_MAX_S, BACKOFF_START_S, ServiceLoop
 
 from lifeos.application.tasks import ApplicationError
 from lifeos.ports.chat import ChatError, IncomingMessage
+from lifeos.service.main import BACKOFF_MAX_S, BACKOFF_START_S, ServiceLoop
 from tests.service.fakes import FakeChannel, text
 
 pytestmark = pytest.mark.unit

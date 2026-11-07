@@ -9,7 +9,7 @@ OWNER = 4242
 STRANGER = 9999
 
 
-def text(update_id: int, body: str, chat_id: int = OWNER) -> IncomingMessage:
+def text(update_id: int, body: str | None, chat_id: int | None = OWNER) -> IncomingMessage:
     return IncomingMessage(update_id, chat_id, body, None)
 
 

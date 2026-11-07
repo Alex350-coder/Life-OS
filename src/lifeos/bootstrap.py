@@ -8,6 +8,7 @@ de modelos.
 
 import os
 from collections.abc import Mapping
+from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC
 from pathlib import Path
@@ -16,6 +17,7 @@ from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
+from lifeos.adapters.json_state import JsonRitualState
 from lifeos.adapters.jsonl_logs import (
     JsonlAuditLog,
     JsonlAuditReader,
@@ -23,9 +25,12 @@ from lifeos.adapters.jsonl_logs import (
     JsonlUsageReader,
 )
 from lifeos.adapters.nvidia_llm import NvidiaChatClient
+from lifeos.adapters.process_lock import ProcessLock
 from lifeos.adapters.schemas import SCHEMAS
 from lifeos.adapters.secrets import MissingSecretError, Secret, read_dotenv, resolve_secret
 from lifeos.adapters.system_clock import SystemClock
+from lifeos.adapters.telegram import DEFAULT_BASE_URL, TelegramBotClient, TelegramNotifier
+from lifeos.adapters.whisper import MODEL_SIZES, FasterWhisperTranscriber
 from lifeos.adapters.yaml_config import YamlConfigSource
 from lifeos.application.closing import DailyClosing
 from lifeos.application.coach import CoachSession
@@ -39,7 +44,9 @@ from lifeos.application.permissions import (
     protected_roots,
     resolve_effective,
 )
+from lifeos.application.rituals import RitualRunner
 from lifeos.application.tools import ToolRegistry
+from lifeos.ports.chat import ChatChannel
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import (
     AgentConfig,
@@ -50,6 +57,7 @@ from lifeos.ports.config import (
 )
 from lifeos.ports.llm import LlmClient
 from lifeos.ports.logs import AuditLog, AuditReader, UsageLog, UsageReader
+from lifeos.ports.transcribe import Transcriber
 from lifeos.ports.vault import VaultPath, VaultStore
 
 ENV_FILE = ".env"
@@ -176,7 +184,11 @@ def _coach(
 
 
 def build_runtime(
-    settings: Settings, *, with_llm: bool = False, clock: Clock | None = None
+    settings: Settings,
+    *,
+    with_llm: bool = False,
+    clock: Clock | None = None,
+    extra_secrets: tuple[Secret, ...] = (),
 ) -> Runtime:
     _check_timezone(settings)
     source = YamlConfigSource(settings.config_dir)
@@ -191,7 +203,8 @@ def build_runtime(
         contracts=frozenset(SCHEMAS),
     )
     secrets = _provider_secrets(settings, catalog) if with_llm else {}
-    known = tuple(secret.reveal() for secret in secrets.values())
+    # Toda clave conocida se redacta de los logs (SEC-08), incluido el token de Telegram.
+    known = tuple(secret.reveal() for secret in (*secrets.values(), *extra_secrets))
     usage_log = JsonlUsageLog(settings.logs_dir, secrets=known)
     audit_log = JsonlAuditLog(settings.logs_dir, secrets=known)
     # Los logs siguen en UTC (ADR-0008); el plan usa la zona de horario.md.
@@ -224,4 +237,101 @@ def build_runtime(
         usage_reader=JsonlUsageReader(settings.logs_dir),
         agents=agents,
         audit_reader=JsonlAuditReader(settings.logs_dir),
+    )
+
+
+# --- Servicio de rituales y Telegram (Fase 6, ADR-0014) --------------------------------------
+
+TELEGRAM_TOKEN_ENV = "TELEGRAM_BOT_TOKEN"  # noqa: S105 - nombre de la variable, no el token
+OWNER_CHAT_ENV = "TELEGRAM_OWNER_CHAT_ID"
+TELEGRAM_API_ENV = "LIFEOS_TELEGRAM_API"  # solo para pruebas locales
+STATE_DIR_ENV = "LIFEOS_STATE_DIR"
+WHISPER_MODEL_ENV = "LIFEOS_WHISPER_MODEL"
+DEFAULT_STATE_DIR = "state"
+DEFAULT_WHISPER_MODEL = "small"
+MAX_CHAT_ID_DIGITS = 20
+
+
+@dataclass(frozen=True, slots=True)
+class ServiceRuntime:
+    runtime: Runtime
+    vault: VaultStore
+    coach: CoachSession
+    channel: ChatChannel
+    rituals: RitualRunner
+    transcriber: Transcriber | None
+    owner_chat_id: int
+    lock: AbstractContextManager[object] = field(repr=False)
+
+
+def _telegram_token(settings: Settings) -> Secret:
+    return resolve_secret(TELEGRAM_TOKEN_ENV, environ=settings.environ, dotenv={})
+
+
+def _telegram_client(settings: Settings, token: Secret) -> TelegramBotClient:
+    try:
+        return TelegramBotClient(
+            token, base_url=settings.environ.get(TELEGRAM_API_ENV) or DEFAULT_BASE_URL
+        )
+    except ValueError as error:
+        raise ConfigRejectedError(TELEGRAM_TOKEN_ENV, (str(error),)) from None
+
+
+def telegram_channel(settings: Settings) -> ChatChannel:
+    """Solo el canal (para `lifeos-servicio --descubrir`): no exige la bóveda ni el chat_id."""
+    return _telegram_client(settings, _telegram_token(settings))
+
+
+def _owner_chat_id(settings: Settings) -> int:
+    raw = (settings.environ.get(OWNER_CHAT_ENV) or "").strip()
+    if not raw.isascii() or not raw.isdigit() or len(raw) > MAX_CHAT_ID_DIGITS or int(raw) <= 0:
+        raise ConfigRejectedError(
+            OWNER_CHAT_ENV,
+            ("debe ser el número de tu chat (obtenlo con 'lifeos-servicio --descubrir')",),
+        )
+    return int(raw)
+
+
+def _whisper_model(settings: Settings) -> str:
+    model = settings.environ.get(WHISPER_MODEL_ENV) or DEFAULT_WHISPER_MODEL
+    if model not in MODEL_SIZES:
+        raise ConfigRejectedError(
+            WHISPER_MODEL_ENV, (f"modelo desconocido; usa {', '.join(sorted(MODEL_SIZES))}",)
+        )
+    return model
+
+
+def build_service(settings: Settings, *, clock: Clock | None = None) -> ServiceRuntime:
+    if settings.vault_path is None:
+        raise ConfigRejectedError("LIFEOS_VAULT_PATH", ("el servicio necesita la bóveda",))
+    token = _telegram_token(settings)
+    client = _telegram_client(settings, token)
+    owner = _owner_chat_id(settings)
+    model = _whisper_model(settings)
+    runtime = build_runtime(settings, clock=clock, extra_secrets=(token,))
+    vault, jefe, coach = runtime.vault, runtime.jefe, runtime.coach
+    if vault is None or jefe is None or coach is None:
+        raise ConfigRejectedError("agentes", ("el servicio necesita al Jefe y al Coach",))
+    state_dir = Path(
+        settings.environ.get(STATE_DIR_ENV) or settings.project_root / DEFAULT_STATE_DIR
+    )
+    rituals = RitualRunner(
+        vault,
+        jefe,
+        coach,
+        TelegramNotifier(client, chat_id=owner),
+        JsonRitualState(state_dir / "rituales.json"),
+        runtime.audit_log,
+        runtime.clock,
+        configured_zone=settings.timezone,
+    )
+    return ServiceRuntime(
+        runtime=runtime,
+        vault=vault,
+        coach=coach,
+        channel=client,
+        rituals=rituals,
+        transcriber=FasterWhisperTranscriber(model),
+        owner_chat_id=owner,
+        lock=ProcessLock(state_dir / "servicio.lock"),
     )

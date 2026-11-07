@@ -1,7 +1,6 @@
 """Bot del propietario: SEC-12, captura por texto y voz y briefing (F6-T03, F6-T04)."""
 
 import pytest
-from lifeos.service.bot import HELP, MAX_VOICE_SECONDS, OwnerBot
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.application.coach import CoachSession
@@ -9,6 +8,7 @@ from lifeos.application.tools import ToolRegistry
 from lifeos.ports.logs import AuditResult
 from lifeos.ports.transcribe import TranscriberUnavailableError, TranscriptionError
 from lifeos.ports.vault import VaultPath
+from lifeos.service.bot import HELP, MAX_VOICE_SECONDS, OwnerBot
 from tests import config_samples as samples
 from tests.application.conftest import WriteNote
 from tests.daily_builders import TASKS, monday_note
@@ -81,7 +81,7 @@ def test_foreign_voice_is_never_downloaded(vault: FilesystemVault) -> None:
 
 def test_updates_that_are_not_messages_are_skipped_silently(vault: FilesystemVault) -> None:
     bot, channel, audit = make_bot(vault)
-    bot.handle(text(1, "x", chat_id=None))  # type: ignore[arg-type]
+    bot.handle(text(1, "x", chat_id=None))
     assert (channel.sent, audit.records) == ([], [])
 
 
@@ -142,7 +142,7 @@ def test_help_and_unknown_commands_answer_with_the_help(vault: FilesystemVault, 
 
 def test_unsupported_content_gets_a_short_answer(vault: FilesystemVault) -> None:
     bot, channel, _ = make_bot(vault)
-    bot.handle(text(1, None))  # type: ignore[arg-type]  (p. ej., una foto o un sticker)
+    bot.handle(text(1, None))  # p. ej., una foto o un sticker
     assert "texto o notas de voz" in channel.sent[0][1]
 
 

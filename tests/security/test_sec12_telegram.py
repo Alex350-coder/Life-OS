@@ -9,10 +9,10 @@ import shutil
 from pathlib import Path
 
 import pytest
-from lifeos.service.bot import OwnerBot
 
 from lifeos.bootstrap import Settings, build_service
 from lifeos.ports.config import ConfigRejectedError
+from lifeos.service.bot import OwnerBot
 from tests.planning_samples import HORARIO
 from tests.stub_http import Reply, StubServer
 
