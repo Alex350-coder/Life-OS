@@ -61,12 +61,21 @@ class LaunchToken:
         return self._value
 
     def consume(self, candidate: str) -> bool:
+        return self.check(candidate) is None
+
+    def check(self, candidate: str | None) -> str | None:
+        """Gasta el token si es válido (devuelve None) o dice por qué no, sin revelarlo."""
         with self._lock:
-            valid = same_secret(candidate, self._value)
-            if not valid or self._used or self._clock() > self._expires:
-                return False
+            if candidate is None:
+                return "falta en la URL"
+            if not same_secret(candidate, self._value):
+                return "no coincide (¿URL incompleta o de un arranque anterior?)"
+            if self._used:
+                return "ya se usó"
+            if self._clock() > self._expires:
+                return "caducó (pasaron más de 5 minutos desde el arranque)"
             self._used = True
-            return True
+            return None
 
 
 @dataclass(frozen=True, slots=True)

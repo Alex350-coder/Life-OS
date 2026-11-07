@@ -82,8 +82,48 @@ def test_missing_token_is_rejected(web: Web) -> None:
 
 def test_launch_token_is_single_use(web: Web) -> None:
     web.login()
+    web.client.cookies.clear()  # otro navegador, sin la sesión abierta
     again = web.client.get("/auth", params={"token": TOKEN}, follow_redirects=False)
     assert again.status_code == 401
+
+
+@pytest.mark.parametrize(
+    "header",
+    [("sec-purpose", "prefetch"), ("sec-purpose", "prefetch;prerender"), ("purpose", "prefetch")],
+)
+def test_browser_prefetch_does_not_spend_the_launch_token(
+    web: Web, header: tuple[str, str]
+) -> None:
+    # Chrome y Edge precargan la URL pegada en la barra antes de pulsar Enter.
+    prefetch = web.client.get(
+        "/auth", params={"token": TOKEN}, headers=dict([header]), follow_redirects=False
+    )
+    assert prefetch.status_code == 503
+    assert "set-cookie" not in prefetch.headers
+    web.login()  # la navegación real todavía entra
+
+
+def test_auth_with_a_live_session_goes_to_the_app(web: Web) -> None:
+    web.login()
+    again = web.client.get("/auth", params={"token": TOKEN}, follow_redirects=False)
+    assert again.status_code == 303
+    assert again.headers["location"] == "/"
+    assert "set-cookie" not in again.headers  # reutiliza la sesión, no abre otra
+
+
+def test_auth_with_a_dead_session_still_needs_a_valid_token(web: Web) -> None:
+    web.client.cookies.set(SESSION_COOKIE, "inventada")
+    response = web.client.get("/auth", params={"token": "otro"}, follow_redirects=False)
+    assert response.status_code == 401
+
+
+def test_rejected_auth_says_why_in_the_terminal(web: Web, caplog: pytest.LogCaptureFixture) -> None:
+    web.login()
+    web.client.cookies.clear()
+    with caplog.at_level("WARNING", logger="lifeos.web"):
+        web.client.get("/auth", params={"token": TOKEN}, follow_redirects=False)
+    assert "ya se usó" in caplog.text
+    assert TOKEN not in caplog.text
 
 
 def test_launch_token_expires(web: Web) -> None:

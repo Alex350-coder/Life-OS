@@ -5,12 +5,13 @@ autenticación con el token de arranque y los estáticos del frontend compilado.
 acceso envuelve todo, incluidos los estáticos.
 """
 
+import logging
 import re
 import time
 from pathlib import Path
 from typing import Annotated
 
-from fastapi import FastAPI, Query
+from fastapi import FastAPI, Query, Request
 from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse, Response
 
 from lifeos.bootstrap import Settings
@@ -28,6 +29,7 @@ from lifeos.web.security import (
 )
 
 MAX_TOKEN_CHARS = 200
+LOGGER = logging.getLogger("lifeos.web")
 NOT_BUILT = (
     "La interfaz web no está compilada. En project/web/ ejecuta: npm ci && npm run build\n"
     "y vuelve a abrir esta página."
@@ -65,6 +67,11 @@ def _static(app: FastAPI, dist: Path) -> None:
         return FileResponse(_dist_file(root, path) or index)
 
 
+def _is_prefetch(request: Request) -> bool:
+    purpose = request.headers.get("sec-purpose") or request.headers.get("purpose") or ""
+    return "prefetch" in purpose.lower()
+
+
 def create_app(
     settings: Settings,
     *,
@@ -87,9 +94,17 @@ def create_app(
 
     @app.get(AUTH_PATH, include_in_schema=False)
     def auth(
+        request: Request,
         token: Annotated[str | None, Query(max_length=MAX_TOKEN_CHARS)] = None,
     ) -> Response:
-        if token is None or not launch_token.consume(token):
+        if _is_prefetch(request):
+            # Chrome y Edge precargan la URL pegada antes de pulsar Enter: no debe gastar el token.
+            return fail("precarga", "la URL de arranque no se precarga", 503)
+        if sessions.get(request.cookies.get(SESSION_COOKIE)) is not None:
+            return RedirectResponse("/", status_code=303)
+        rejection = launch_token.check(token)
+        if rejection is not None:
+            LOGGER.warning("acceso rechazado: el token de arranque %s", rejection)
             return fail("token", "token de arranque no válido, usado o caducado", 401)
         session = sessions.create()
         response = RedirectResponse("/", status_code=303)
