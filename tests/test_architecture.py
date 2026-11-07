@@ -18,9 +18,11 @@ ALLOWED = {
     "cli": {"domain", "ports", "application", "cli", "bootstrap"},
     # Presentación web (ADR-0012, revisión de ADR-0003 del 2026-10-30): mismas reglas que la CLI.
     "web": {"domain", "ports", "application", "web", "bootstrap"},
+    # Servicio de rituales y bot de Telegram (ADR-0014): presentación como la CLI y la web.
+    "service": {"domain", "ports", "application", "service", "bootstrap"},
 }
 # Capas de presentación: ninguna otra capa las importa y no llaman a las reglas del planificador.
-PRESENTATION = ("cli", "web")
+PRESENTATION = ("cli", "web", "service")
 # Dependencias de terceros permitidas por capa (ADR-0007). Dominio, puertos y aplicación no
 # conocen PyYAML ni Pydantic: los adaptadores devuelven tipos propios ya validados.
 THIRD_PARTY = {
@@ -31,6 +33,7 @@ THIRD_PARTY = {
     "adapters": {"yaml", "pydantic", "faster_whisper"},
     "cli": set(),
     "web": {"fastapi", "starlette", "pydantic", "uvicorn"},
+    "service": set(),
 }
 # Raíz de composición: único módulo que conecta capas (incluidos los adaptadores).
 COMPOSITION_ROOT = "bootstrap.py"
