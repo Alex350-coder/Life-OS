@@ -17,7 +17,8 @@ dependencies = [
 
 [project.optional-dependencies]
 # Transcripción local de notas de voz (ADR-0015): uv sync --extra voz
-voz = ["faster-whisper>=1.2,<2"]
+# PyAV 19 quitó open(metadata_errors=...), que usa faster-whisper 1.2: se limita a <19.
+voz = ["faster-whisper>=1.2,<2", "av>=11,<19"]
 
 [project.scripts]
 lifeos = "lifeos.cli.main:main"

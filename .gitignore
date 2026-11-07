@@ -45,3 +45,6 @@ web/test-results/
 web/playwright-report/
 web/coverage/
 web/playwright/.auth/
+
+# Estado local del servicio de rituales y su candado (ADR-0014)
+state/
