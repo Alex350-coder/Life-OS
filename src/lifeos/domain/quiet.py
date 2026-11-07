@@ -49,6 +49,10 @@ def _day_bounds(day: date, zone: tzinfo) -> Interval:
     return Interval(start, end)
 
 
+def _unchecked(day: date, minute: int, zone: tzinfo) -> datetime:
+    return datetime.combine(day, time(), tzinfo=zone) + timedelta(minutes=minute)
+
+
 def _dnd(day: date, ranges: Sequence[TimeRange], zone: tzinfo) -> list[QuietWindow]:
     windows = []
     for r in ranges:
@@ -57,7 +61,9 @@ def _dnd(day: date, ranges: Sequence[TimeRange], zone: tzinfo) -> list[QuietWind
                 local_datetime(day, r.start, zone), local_datetime(day, r.end, zone)
             )
         except ValidationError:
-            continue  # el rango toca una hora que no existe ese día (cambio de horario)
+            # El rango toca una hora que no existe o es ambigua ese día (cambio de horario): se
+            # usa la hora de pared sin validar, para que el silencio se mantenga (falla cerrado).
+            interval = Interval(_unchecked(day, r.start, zone), _unchecked(day, r.end, zone))
         windows.append(QuietWindow(interval, True, DO_NOT_DISTURB))
     return windows
 

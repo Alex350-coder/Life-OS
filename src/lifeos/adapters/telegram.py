@@ -82,7 +82,7 @@ def _pieces(line: str) -> list[str]:
 def _split(text: str) -> list[str]:
     """Mensajes de como mucho MAX_MESSAGE_CHARS, cortando por líneas cuando se puede. Un texto
     vacío no produce mensajes (Telegram rechaza los vacíos)."""
-    if not text:
+    if not text.strip():
         return []
     chunks: list[str] = []
     current: str | None = None

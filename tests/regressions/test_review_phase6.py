@@ -302,3 +302,26 @@ def test_old_failed_mark_is_not_retried_after_the_limit() -> None:
 
     mark = RitualMark(RitualStatus.FALLIDO, MAX_ATTEMPTS, at(MON, "09:00"))
     assert not _retryable(mark, at(MON, "12:00"))
+
+
+# --- code-reviewer (revisión final) -------------------------------------------------------------
+
+
+def test_do_not_disturb_on_a_dst_change_still_silences() -> None:
+    # 2026-10-25 en Madrid: 02:00–03:00 ocurre dos veces. El rango no puede desaparecer.
+    madrid = ZoneInfo("Europe/Madrid")
+    day = date(2026, 10, 25)
+    schedule = parse_horario(horario(zona="Europe/Madrid", disponibilidad="- lun-dom 00:00–24:00"))
+    windows = quiet_windows(
+        day_capacity(schedule, day),
+        parse_rituales("## No molestar\n- dom 01:30–02:30\n").quiet_for(day),
+        day,
+        madrid,
+    )
+    moment = datetime.combine(day, time(1, 45), tzinfo=madrid)
+    delivery = plan_delivery(moment, moment + timedelta(hours=3), windows)
+    assert (delivery.kind, delivery.reason) == (DeliveryKind.DESCARTAR, "no molestar")
+
+
+def test_whitespace_only_text_produces_no_message() -> None:
+    assert _split(" \n \n") == []
