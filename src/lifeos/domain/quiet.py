@@ -70,6 +70,11 @@ def _containing(windows: Sequence[QuietWindow], moment: datetime) -> list[QuietW
     return [w for w in windows if w.interval.start <= moment < w.interval.end]
 
 
+def is_quiet(moment: datetime, windows: Sequence[QuietWindow]) -> bool:
+    """El propietario está en silencio (duro o blando) en este instante."""
+    return bool(_containing(windows, moment))
+
+
 def plan_delivery(at: datetime, deadline: datetime, windows: Sequence[QuietWindow]) -> Delivery:
     moment = at
     for _ in range(len(windows) + 1):  # cada aplazamiento sale de al menos una ventana
