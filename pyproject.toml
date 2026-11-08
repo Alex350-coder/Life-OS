@@ -15,9 +15,15 @@ dependencies = [
     "uvicorn>=0.54,<1",
 ]
 
+[project.optional-dependencies]
+# Transcripción local de notas de voz (ADR-0015): uv sync --extra voz
+# PyAV 19 quitó open(metadata_errors=...), que usa faster-whisper 1.2: se limita a <19.
+voz = ["faster-whisper>=1.2,<2", "av>=11,<19"]
+
 [project.scripts]
 lifeos = "lifeos.cli.main:main"
 lifeos-web = "lifeos.web.server:main"
+lifeos-servicio = "lifeos.service.main:main"
 
 [build-system]
 requires = ["uv_build>=0.11.18,<0.12.0"]
@@ -64,6 +70,11 @@ strict = true
 plugins = ["pydantic.mypy"]
 python_version = "3.12"
 files = ["src", "tests"]
+
+[[tool.mypy.overrides]]
+# Extra opcional sin tipos publicados (ADR-0015); el adaptador lo trata como Any.
+module = ["faster_whisper", "faster_whisper.*"]
+ignore_missing_imports = true
 
 [tool.bandit]
 exclude_dirs = ["tests"]

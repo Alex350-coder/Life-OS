@@ -4,6 +4,7 @@ Valida la configuración, genera el token de arranque y muestra la URL de un sol
 de salida como la CLI: 0 correcto, 2 error de uso o de configuración.
 """
 
+import socket
 import sys
 import time
 from collections.abc import Mapping, Sequence
@@ -35,6 +36,22 @@ def _port(environ: Mapping[str, str]) -> int:
     return int(raw)
 
 
+def _bind_exclusive(port: int) -> socket.socket:
+    """Abre el puerto en uso exclusivo. `Config.bind_socket` de uvicorn usa SO_REUSEADDR, que en
+    Windows deja que dos instancias compartan el puerto: el navegador acababa hablando con una
+    anterior, con otro token. SO_EXCLUSIVEADDRUSE solo existe en Windows."""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    try:
+        exclusive = getattr(socket, "SO_EXCLUSIVEADDRUSE", None)
+        if exclusive is not None:
+            sock.setsockopt(socket.SOL_SOCKET, exclusive, 1)
+        sock.bind((LOOPBACK, port))
+    except OSError:
+        sock.close()
+        raise
+    return sock
+
+
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -62,8 +79,8 @@ def main(
     )
     try:
         # El puerto se abre antes de mostrar el token: si está ocupado, no se muestra nada útil.
-        sock = config.bind_socket()
-    except (OSError, SystemExit) as error:
+        sock = _bind_exclusive(port)
+    except OSError as error:
         print(f"Error de configuración: no se pudo abrir {LOOPBACK}:{port} ({error})", file=stderr)
         return EXIT_USAGE
     print(

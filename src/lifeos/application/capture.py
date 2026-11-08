@@ -11,6 +11,7 @@ INBOX = VaultPath("00-Inbox")
 MAX_CAPTURE_CHARS = 20_000
 MAX_NAME_ATTEMPTS = 50
 DEFAULT_SOURCE = "manual"
+UNCONFIRMED = "sin_confirmar"
 _SOURCE_RE = re.compile(r"[a-z0-9_-]{1,32}")
 
 
@@ -25,18 +26,25 @@ def _validate(text: str, source: str, now: datetime) -> None:
         raise ValidationError("fecha", now, "requiere zona horaria")
 
 
-def _render(text: str, source: str, now: datetime) -> str:
-    # Fuente y momento quedan registrados (spec memoria-y-vigencia).
-    header = f"---\ncapturado: {now.isoformat()}\nfuente: {source}\n---\n\n"
+def _render(text: str, source: str, now: datetime, *, unconfirmed: bool) -> str:
+    # Fuente y momento quedan registrados (spec memoria-y-vigencia). Una transcripción de voz
+    # puede tener errores: queda sin confirmar hasta que el propietario la revise (ADR-0015).
+    state = f"estado: {UNCONFIRMED}\n" if unconfirmed else ""
+    header = f"---\ncapturado: {now.isoformat()}\nfuente: {source}\n{state}---\n\n"
     return header + text.rstrip("\r\n") + "\n"
 
 
 def capture(
-    vault: VaultStore, text: str, *, now: datetime, source: str = DEFAULT_SOURCE
+    vault: VaultStore,
+    text: str,
+    *,
+    now: datetime,
+    source: str = DEFAULT_SOURCE,
+    unconfirmed: bool = False,
 ) -> VaultPath:
     """Crea una nota nueva en el Inbox. Nunca sobrescribe: ante colisión usa un sufijo."""
     _validate(text, source, now)
-    content = _render(text, source, now)
+    content = _render(text, source, now, unconfirmed=unconfirmed)
     stamp = now.strftime("%Y%m%d-%H%M%S")
     for attempt in range(1, MAX_NAME_ATTEMPTS + 1):
         name = stamp if attempt == 1 else f"{stamp}-{attempt}"
