@@ -17,14 +17,15 @@ propuestas del Coach; `aprobar` la vuelve a validar y republica solo hoy y los d
 """
 
 import uuid
-from dataclasses import dataclass
-from datetime import datetime
+from dataclasses import dataclass, replace
+from datetime import datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
 from lifeos.application.plan_publication import PlanPublication, PlanRejectedError
 from lifeos.application.tasks import ApplicationError, TaskQuery
 from lifeos.application.tools import ActorContext, ToolRegistry
+from lifeos.domain.adaptive_load import WINDOW_DAYS, LoadAdvice, advise, closing_score
 from lifeos.domain.adjustments import (
     Adjustment,
     adjustment_entry,
@@ -180,6 +181,20 @@ class JefePlanner:
         actor = self.new_actor()
         return self._context(actor, self._schedule(actor), week, now or self._clock.now())
 
+    def _load_advice(self, actor: ActorContext, schedule: Schedule, now: datetime) -> LoadAdvice:
+        """Cierres de los últimos días (el Jefe ya lee `Diario/`), para la carga adaptativa."""
+        today = now.astimezone(schedule.zone).date()
+        scores = []
+        for offset in range(WINDOW_DAYS):
+            try:
+                text = self._tools.leer_nota(actor, daily_path(today - timedelta(days=offset)))
+            except NoteNotFoundError:
+                continue
+            score = closing_score(text)
+            if score is not None:
+                scores.append(score)
+        return advise(schedule.limits.focus_max, scores)
+
     def _week(self, week: IsoWeek | None, schedule: Schedule) -> IsoWeek:
         if week is not None:
             return week
@@ -282,9 +297,15 @@ class JefePlanner:
             )
         existing = chain[0].snapshot if chain else None
         now = self._clock.now()
-        context = self._context(actor, schedule, target, now)
+        advice = self._load_advice(actor, schedule, now)
+        # DT-01: solo la propuesta usa el foco ajustado. La aprobación valida contra el límite del
+        # propietario, que es un techo: un plan más ligero siempre lo cumple.
+        adapted = replace(schedule, limits=replace(schedule.limits, focus_max=advice.focus_max))
+        context = self._context(actor, adapted, target, now)
+        proposal = self._draft(context, origin, actor)
+        justification = "; ".join(p for p in (proposal.justification, advice.reason) if p)
         publication = PlanPublication(
-            proposal=self._draft(context, origin, actor),
+            proposal=replace(proposal, justification=justification),
             context=context,
             status=PlanStatus.PROPUESTO,
             generated=now,

@@ -300,3 +300,41 @@ def test_tool_validates_even_when_called_directly(
         )
     assert ConflictCode.FIJO_ALTERADO in {c.code for c in info.value.conflicts}
     assert not vault.exists(WEEKLY)
+
+
+# --- Carga adaptativa (DT-01) -----------------------------------------------------------------
+
+
+def _closed_day(day: str, *entries: str) -> str:
+    lines = "\n".join(f"- 22:30 · {entry}" for entry in entries)
+    return f"---\nfecha: {day}\n---\n\n## Cierre\n{lines}\n"
+
+
+def test_poor_recent_closings_lower_the_focus_of_the_next_proposal(
+    planner: JefePlanner, vault: FilesystemVault, write_note: WriteNote
+) -> None:
+    for day in ("2026-10-29", "2026-10-30", "2026-10-31"):
+        write_note(
+            f"Diario/{day}.md",
+            _closed_day(
+                day, "no realizada: t-aaaaaa (x)", "no realizada: t-bbbbbb (x)", "hecha: t-cccccc"
+            ),
+        )
+    outcome = planner.proponer(WEEK, origin=PlanOrigin.HEURISTICA)
+    note = parse_weekly(vault.read(WEEKLY).text)
+    assert "carga reducida a 2h30/día" in note.justification
+    per_day: dict[object, int] = {}
+    for block in note.blocks:
+        if block.task_id is not None:
+            minutes = int((block.interval.end - block.interval.start).total_seconds() // 60)
+            when = block.interval.start.date()
+            per_day[when] = per_day.get(when, 0) + minutes
+    assert outcome.accepted
+    assert max(per_day.values()) <= 150
+
+
+def test_without_enough_closings_the_owner_limit_is_kept(
+    planner: JefePlanner, vault: FilesystemVault
+) -> None:
+    planner.proponer(WEEK, origin=PlanOrigin.HEURISTICA)
+    assert "carga sin ajustar" in parse_weekly(vault.read(WEEKLY).text).justification
