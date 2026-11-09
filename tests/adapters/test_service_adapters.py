@@ -31,8 +31,11 @@ class FakeSegment:
 class FakeModel:
     instances: list["FakeModel"] = []  # noqa: RUF012 - registro de la prueba
 
-    def __init__(self, size: str, *, device: str, compute_type: str) -> None:
+    duration = 4.0
+
+    def __init__(self, size: str, *, device: str, compute_type: str, revision: str) -> None:
         self.args = (size, device, compute_type)
+        self.revision = revision
         self.calls: list[dict[str, object]] = []
         FakeModel.instances.append(self)
 
@@ -40,7 +43,8 @@ class FakeModel:
         self, audio: BinaryIO, **options: object
     ) -> tuple[Iterator[FakeSegment], object]:
         self.calls.append({"audio": audio.read(), **options})
-        return iter([FakeSegment(" Comprar cuerdas "), FakeSegment("para la guitarra.")]), None
+        info = types.SimpleNamespace(duration=self.duration)
+        return iter([FakeSegment(" Comprar cuerdas "), FakeSegment("para la guitarra.")]), info
 
 
 @pytest.fixture
@@ -63,6 +67,20 @@ def test_transcribes_from_memory_in_spanish_and_reuses_the_model(
     assert model.calls[0]["audio"] == b"audio-1"
     assert model.calls[0]["language"] == "es"
     assert model.calls[0]["vad_filter"] is True
+
+
+def test_model_revision_is_pinned(fake_whisper: type[FakeModel]) -> None:
+    FasterWhisperTranscriber("small").transcribe(b"audio")
+    assert fake_whisper.instances[0].revision == "536b0662742c02347bc0e980a01041f333bce120"
+
+
+def test_real_duration_over_the_limit_is_rejected_before_transcribing(
+    fake_whisper: type[FakeModel], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Telegram declara la duración; manda la del audio decodificado (DT-08).
+    monkeypatch.setattr(FakeModel, "duration", 301.0)
+    with pytest.raises(TranscriptionError, match="5 minutos"):
+        FasterWhisperTranscriber("small").transcribe(b"audio")
 
 
 def test_missing_extra_is_reported_as_unavailable(monkeypatch: pytest.MonkeyPatch) -> None:
