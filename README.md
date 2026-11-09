@@ -78,12 +78,16 @@ uv run lifeos-web                            # escucha solo en 127.0.0.1:8765 (L
   - Es de un solo uso y caduca en 5 minutos. Ábrela en el navegador y no la compartas.
   - Crea una sesión con una cookie `HttpOnly` y `SameSite=Strict` que dura 12 horas.
   - Reiniciar el servidor cierra todas las sesiones; para volver a entrar, usa la URL nueva.
-- **Vistas.**
+  - Si la sesión sigue viva, abrir otra vez el enlace lleva a la app. La precarga del navegador no gasta el token.
+  - El puerto se abre en exclusiva. Si ya hay un `lifeos-web` en marcha, el segundo no arranca (`no se pudo abrir 127.0.0.1:8765`).
+- **Vistas** (estilo de `../DESIGN.md`: lienzo oscuro, botones en píldora y el trío pastel):
   - *Hoy:* bloque actual, chat con el Coach (check-in) y cierre, que pide vista previa antes de confirmar.
+  - *Oficina:* escena pixel art animada, generada por código (inspirada en Habblaud). Tú, el Jefe, el Coach y los especialistas aparecen en sus puestos con datos reales del día. La luz sigue la hora y hay una barra de progreso del trabajo. Un clic en un personaje abre su vista. La lista de abajo dice lo mismo en texto. Con `prefers-reduced-motion` se muestra un fotograma fijo.
   - *Semana:* carga por día, tiempo protegido y chat con el Jefe (proponer, aprobar y replanificar).
   - *Tareas:* captura rápida, próximos vencimientos y filtros.
   - *Historial:* la auditoría de este mes y del anterior.
   - *Agentes:* en solo lectura, con permisos efectivos y uso del mes.
+  - Los chats se guardan en este navegador (almacenamiento local, 100 mensajes como máximo). Se borran con «Borrar conversación».
 - **IA.** Las casillas de IA usan las mismas opciones `--ia` de la CLI y necesitan `NVIDIA_API_KEY`. Admiten 6 peticiones por minuto.
 - **Seguridad (SEC-11).**
   - Una petición sin sesión recibe 401.
@@ -115,6 +119,26 @@ uv run lifeos-web                            # escucha solo en 127.0.0.1:8765 (L
 - **Bot.** Solo atiende tu `chat_id` (SEC-12): los demás se ignoran sin respuesta y se auditan con una huella, nunca con su contenido. Escribe cualquier texto para capturarlo en `00-Inbox/`; `/hoy` muestra el plan; `/ayuda`, la ayuda. Las notas de voz se guardan como capturas `sin_confirmar`. El bot no aprueba planes ni cambia tareas.
 - **Estado.** `state/rituales.json` guarda qué se envió y `state/servicio.lock` impide dos servicios a la vez. Si `rituales.json` se daña, el servicio lo dice: revísalo o bórralo (puede repetir los avisos de hoy).
 - **Privacidad.** Los mensajes pasan por los servidores de Telegram. El audio se transcribe en este PC y no se guarda.
+- **Voz en segundo plano.** El bot contesta «la estoy transcribiendo» y sigue atendiendo mensajes y rituales; cuando termina, te envía el texto. El offset de Telegram se guarda en `state/telegram.json`: tras un reinicio no se repiten capturas.
+
+## Respaldo cifrado de la bóveda (SEC-14; ADR-0016)
+```bash
+uv run lifeos-respaldo crear                       # pide la frase dos veces (mínimo 12 caracteres)
+uv run lifeos-respaldo verificar RUTA.lorespaldo   # descifra y comprueba, sin escribir nada
+uv run lifeos-respaldo restaurar RUTA.lorespaldo --destino C:\ruta\nueva   # nunca sobrescribe
+```
+- **Cifrado.** Comprime toda la bóveda (incluido `.obsidian/`; sin `.trash/` ni temporales) y la cifra con AES-256-GCM. La clave sale de tu frase con scrypt. Una frase incorrecta o un archivo alterado se detectan.
+- **Destino.** Por defecto, `~/LifeOS-Respaldos`, fuera de OneDrive; se cambia con `LIFEOS_BACKUP_DIR`. Nunca se sobrescribe un respaldo anterior. El destino no puede estar dentro de la bóveda.
+- **Restaurar.** Solo escribe en una carpeta nueva o vacía. Rechaza rutas que intenten salir del destino. Tu bóveda real no se toca nunca.
+- **La frase no se guarda en ningún sitio.** Si la pierdes, el respaldo no se puede abrir. Para un respaldo programado, se puede poner en `LIFEOS_BACKUP_PASSPHRASE` dentro de `.env` (queda en claro en este PC).
+
+## Carga adaptativa (DT-01)
+`semana` mira los cierres de los últimos 7 días. Con al menos 3 días cerrados, calcula cuánto cumpliste: hecha cuenta 1, avance 0,5 y no realizada 0. Según eso, la propuesta usa:
+- el 100 % de `foco_max_dia` si cumpliste el 80 % o más;
+- el 85 % entre el 50 % y el 80 %;
+- el 70 % por debajo del 50 %, nunca menos de 1 h.
+
+El límite del horario es un techo: la carga nunca lo supera. La justificación del plan explica el ajuste. Aprobar valida contra tu límite original.
 
 ## Verificación real del proveedor
 ```bash
