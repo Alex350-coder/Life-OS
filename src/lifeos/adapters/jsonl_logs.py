@@ -155,6 +155,7 @@ _OPTIONAL_INT_FIELDS = ("tokens_prompt", "tokens_completion", "http_status")
 _TEXT_FIELDS = ("correlation_id", "provider", "model", "profile", "agent", "ritual")
 _UTC_SUFFIX = "Z"
 MONTHS_PER_YEAR = 12
+MAX_LOG_FILE_BYTES = 64 * 2**20  # DT-13: un mes normal ocupa unos pocos cientos de KiB
 MAX_COST_USD = Decimal(1_000_000)  # más que esto en un intento es un registro dañado
 
 
@@ -241,11 +242,17 @@ def _read_month[R](
         raise ValueError("el mes debe estar entre 1 y 12")
     path = directory / f"{prefix}-{year:04d}-{month:02d}.jsonl"
     try:
-        raw = path.read_bytes()
+        with path.open("rb") as handle:
+            raw = handle.read(MAX_LOG_FILE_BYTES + 1)
     except FileNotFoundError:
         return (), 0, 0
     except OSError as error:
         raise LogWriteError(f"no se pudo leer {path.name}: {error.strerror}") from None
+    if len(raw) > MAX_LOG_FILE_BYTES:
+        raise LogWriteError(
+            f"{path.name} es demasiado grande (más de {MAX_LOG_FILE_BYTES // 2**20} MiB); "
+            "revísalo: un mes normal ocupa unos cientos de KiB"
+        )
     records: list[R] = []
     malformed = 0
     # Se decodifica línea a línea: un byte dañado invalida solo su línea, no el mes entero.

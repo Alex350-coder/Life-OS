@@ -26,6 +26,7 @@ NOTE_SUFFIX = ".md"
 TEMP_PREFIX = ".lifeos-"
 REPLACE_ATTEMPTS = 3
 REPLACE_BACKOFF_SECONDS = 0.05
+MAX_NOTE_BYTES = 2 * 1024 * 1024  # DT-13: una nota de texto real nunca se acerca a esto
 
 
 def _version_of(data: bytes) -> Version:
@@ -85,11 +86,18 @@ class FilesystemVault:
 
     def _read_bytes(self, target: Path) -> bytes | None:
         try:
-            return target.read_bytes()
+            with target.open("rb") as handle:
+                data = handle.read(MAX_NOTE_BYTES + 1)
         except FileNotFoundError:
             return None
         except OSError as exc:
             raise VaultIOError(f"no se pudo leer {target.name}: {exc}") from exc
+        if len(data) > MAX_NOTE_BYTES:
+            raise VaultIOError(
+                f"{target.name} es demasiado grande (más de {MAX_NOTE_BYTES // 1024} KiB); "
+                "Life OS solo lee notas de texto"
+            )
+        return data
 
     def read(self, path: VaultPath) -> Snapshot:
         data = self._read_bytes(self._locate(path))

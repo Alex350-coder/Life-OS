@@ -267,3 +267,13 @@ def test_list_notes_skips_links(vault: FilesystemVault, root: Path, tmp_path: Pa
     _symlink_or_skip(root / "enlace", outside, is_dir=True)
 
     assert vault.list_notes() == (VaultPath.parse("dentro.md"),)
+
+
+def test_oversized_note_is_refused_without_reading_it_whole(
+    vault: FilesystemVault, root: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # DT-13: una nota enorme (un PDF renombrado, un volcado) no debe agotar la memoria.
+    monkeypatch.setattr("lifeos.adapters.filesystem_vault.MAX_NOTE_BYTES", 64)
+    (root / "grande.md").write_bytes(b"x" * 65)
+    with pytest.raises(VaultIOError, match="demasiado grande"):
+        vault.read(VaultPath.parse("grande.md"))
