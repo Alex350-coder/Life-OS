@@ -48,6 +48,7 @@ class WebRuntime:
         self._llm: Runtime | None = None
         self._build_lock = threading.Lock()
         self._write_lock = threading.Lock()
+        self._ai_lock = threading.Lock()
 
     @property
     def base(self) -> Runtime:
@@ -67,8 +68,11 @@ class WebRuntime:
             return self._llm
 
     @contextmanager
-    def writing(self) -> Iterator[None]:
-        with self._write_lock:
+    def writing(self, *, use_ai: bool = False) -> Iterator[None]:
+        """Serializa las escrituras. Las que esperan a la IA (decenas de segundos) van por su propio
+        candado (DT-09): una captura o un cierre no esperan a una propuesta. Si las dos tocan la
+        misma nota, la bóveda detecta el conflicto por versión y la segunda se rechaza."""
+        with self._ai_lock if use_ai else self._write_lock:
             yield
 
 

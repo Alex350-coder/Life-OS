@@ -60,6 +60,18 @@ def _ends_without_newline(path: Path) -> bool:
         return False
 
 
+_LOCKS: dict[tuple[Path, str], threading.Lock] = {}
+_LOCKS_GUARD = threading.Lock()
+
+
+def _directory_lock(directory: Path, prefix: str) -> threading.Lock:
+    """Un candado por archivo de log y proceso: la web crea un runtime con IA aparte del base y
+    los dos escriben en los mismos JSONL (DT-09). Sin compartirlo, dos líneas podrían mezclarse."""
+    key = (directory.absolute(), prefix)
+    with _LOCKS_GUARD:
+        return _LOCKS.setdefault(key, threading.Lock())
+
+
 class _JsonlLog:
     def __init__(self, directory: Path, prefix: str, secrets: tuple[str, ...]) -> None:
         self._dir = directory
@@ -68,7 +80,7 @@ class _JsonlLog:
         self._secrets = tuple(
             {form for secret in secrets if secret for form in (secret, json.dumps(secret)[1:-1])}
         )
-        self._lock = threading.Lock()
+        self._lock = _directory_lock(directory, prefix)
 
     def _line(self, record: UsageRecord | AuditRecord) -> str:
         fields = {f.name: _json_value(getattr(record, f.name)) for f in dataclasses.fields(record)}
