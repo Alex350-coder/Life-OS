@@ -60,19 +60,44 @@ class JsonRitualState:
             }
             for key, mark in sorted(marks.items())
         }
+        _write_atomic(self._path, data)
+
+
+class JsonOffsetStore:
+    """Siguiente `update_id` de Telegram (DT-07): sobrevive a un reinicio del servicio."""
+
+    def __init__(self, path: Path) -> None:
+        self._path = path
+
+    def load(self) -> int | None:
         try:
-            self._path.parent.mkdir(parents=True, exist_ok=True)
-            fd, temp = tempfile.mkstemp(dir=self._path.parent, prefix=".rituales-", suffix=".tmp")
-            try:
-                with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                    json.dump(data, handle, ensure_ascii=False, indent=1)
-                    handle.flush()
-                    os.fsync(handle.fileno())
-                Path(temp).replace(self._path)
-            except BaseException:
-                Path(temp).unlink(missing_ok=True)
-                raise
-        except OSError as error:
+            raw = json.loads(self._path.read_text(encoding="utf-8")).get("offset")
+        except FileNotFoundError:
+            return None
+        except (OSError, ValueError, AttributeError) as error:
             raise StateError(
-                f"no se pudo guardar {self._path.name}: {type(error).__name__}"
+                f"{self._path.name} no se pudo leer ({type(error).__name__})"
             ) from None
+        if isinstance(raw, bool) or not isinstance(raw, int) or raw < 0:
+            raise StateError(f"{self._path.name} tiene un offset no válido")
+        return raw
+
+    def save(self, offset: int) -> None:
+        _write_atomic(self._path, {"offset": offset})
+
+
+def _write_atomic(path: Path, data: object) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}-", suffix=".tmp")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                json.dump(data, handle, ensure_ascii=False, indent=1)
+                handle.flush()
+                os.fsync(handle.fileno())
+            Path(temp).replace(path)
+        except BaseException:
+            Path(temp).unlink(missing_ok=True)
+            raise
+    except OSError as error:
+        raise StateError(f"no se pudo guardar {path.name}: {type(error).__name__}") from None

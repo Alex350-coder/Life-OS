@@ -24,10 +24,12 @@ class FakeChannel:
     batches: list[tuple[IncomingMessage, ...] | ChatError] = field(default_factory=list)
     sent: list[tuple[int, str]] = field(default_factory=list)
     polls: list[int | None] = field(default_factory=list)
+    timeouts: list[int] = field(default_factory=list)
     downloads: int = 0
 
     def poll(self, offset: int | None, timeout_s: int) -> tuple[IncomingMessage, ...]:
         self.polls.append(offset)
+        self.timeouts.append(timeout_s)
         if not self.batches:
             return ()
         batch = self.batches.pop(0)

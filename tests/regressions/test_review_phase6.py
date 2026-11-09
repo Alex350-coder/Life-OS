@@ -255,11 +255,15 @@ def test_hoy_with_a_broken_schedule_answers_instead_of_failing(
 @dataclass
 class ExplodingBot:
     handled: list[int] = field(default_factory=list)
+    busy: bool = False
 
     def handle(self, message: IncomingMessage) -> None:
         self.handled.append(message.update_id)
         if message.update_id == 1:
             raise KeyError("fallo de programación")
+
+    def drain(self) -> None:
+        raise RuntimeError("la voz también falla")  # tampoco tumba el bucle
 
 
 @dataclass

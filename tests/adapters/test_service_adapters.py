@@ -10,7 +10,7 @@ from typing import BinaryIO
 
 import pytest
 
-from lifeos.adapters.json_state import JsonRitualState
+from lifeos.adapters.json_state import JsonOffsetStore, JsonRitualState
 from lifeos.adapters.process_lock import AlreadyRunningError, ProcessLock
 from lifeos.adapters.whisper import FasterWhisperTranscriber
 from lifeos.ports.state import RitualMark, RitualStatus, StateError
@@ -154,3 +154,21 @@ def test_a_second_instance_cannot_take_the_lock(tmp_path: Path) -> None:
         ProcessLock(path).acquire()
     with ProcessLock(path):  # liberado al salir
         pass
+
+
+# --- Offset de Telegram (DT-07) ---------------------------------------------------------------
+
+
+def test_offset_store_round_trips_and_starts_empty(tmp_path: Path) -> None:
+    store = JsonOffsetStore(tmp_path / "state" / "telegram.json")
+    assert store.load() is None
+    store.save(1234)
+    assert JsonOffsetStore(tmp_path / "state" / "telegram.json").load() == 1234
+
+
+@pytest.mark.parametrize("content", ["{", "[]", '{"offset": -1}', '{"offset": true}'])
+def test_damaged_offset_file_is_an_explicit_error(tmp_path: Path, content: str) -> None:
+    path = tmp_path / "telegram.json"
+    path.write_text(content, encoding="utf-8")
+    with pytest.raises(StateError):
+        JsonOffsetStore(path).load()

@@ -18,7 +18,7 @@ from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
-from lifeos.adapters.json_state import JsonRitualState
+from lifeos.adapters.json_state import JsonOffsetStore, JsonRitualState
 from lifeos.adapters.jsonl_logs import (
     JsonlAuditLog,
     JsonlAuditReader,
@@ -264,6 +264,7 @@ class ServiceRuntime:
     owner_chat_id: int
     fingerprint_key: bytes = field(repr=False)  # clave de la huella de SEC-12
     lock: AbstractContextManager[object] = field(repr=False)
+    offsets: JsonOffsetStore | None = None
 
 
 def _telegram_token(settings: Settings) -> Secret:
@@ -338,4 +339,5 @@ def build_service(settings: Settings, *, clock: Clock | None = None) -> ServiceR
         # Derivada del token: secreta, estable y sin otro secreto que guardar.
         fingerprint_key=hashlib.sha256(b"lifeos-sec12:" + token.reveal().encode()).digest(),
         lock=ProcessLock(state_dir / "servicio.lock"),
+        offsets=JsonOffsetStore(state_dir / "telegram.json"),
     )

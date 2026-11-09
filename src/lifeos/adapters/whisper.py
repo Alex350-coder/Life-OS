@@ -54,9 +54,7 @@ class FasterWhisperTranscriber:
         model = self._load()
         try:
             # Los segmentos son perezosos: la duración real se conoce antes de transcribir.
-            segments, info = model.transcribe(
-                io.BytesIO(audio), language=LANGUAGE, vad_filter=True
-            )
+            segments, info = model.transcribe(io.BytesIO(audio), language=LANGUAGE, vad_filter=True)
             if float(getattr(info, "duration", 0.0)) > MAX_AUDIO_S:
                 raise TranscriptionError("la nota de voz dura más de 5 minutos")
             parts = [segment.text.strip() for segment in segments]

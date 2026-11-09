@@ -10,6 +10,7 @@ import argparse
 import sys
 import time
 from collections.abc import Callable, Mapping, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Protocol, TextIO
 
@@ -22,6 +23,7 @@ from lifeos.ports.state import RitualStatus
 from lifeos.service.bot import OwnerBot
 
 POLL_TIMEOUT_S = 25
+BUSY_POLL_TIMEOUT_S = 2  # con una nota de voz transcribiéndose: se recoge en cuanto termine
 DISCOVER_TIMEOUT_S = 30
 BACKOFF_START_S = 5.0
 BACKOFF_MAX_S = 300.0
@@ -34,11 +36,22 @@ STARTUP_OR_VALUE: tuple[type[Exception], ...] = (ValueError, *STARTUP_ERRORS)
 
 
 class _Handler(Protocol):
+    @property
+    def busy(self) -> bool: ...
+
     def handle(self, message: IncomingMessage) -> None: ...
+
+    def drain(self) -> None: ...
 
 
 class _Rituals(Protocol):
     def tick(self) -> Sequence[RitualReport]: ...
+
+
+class _Offsets(Protocol):
+    def load(self) -> int | None: ...
+
+    def save(self, offset: int) -> None: ...
 
 
 def _stderr(line: str) -> None:
@@ -55,13 +68,15 @@ class ServiceLoop:
         *,
         sleep: Callable[[float], None] = time.sleep,
         log: Callable[[str], None] = _stderr,
+        offsets: _Offsets | None = None,
     ) -> None:
         self._channel = channel
         self._bot = bot
         self._rituals = rituals
         self._sleep = sleep
         self._log = log
-        self._offset: int | None = None
+        self._offsets = offsets
+        self._offset = self._load_offset()
         self._backoff = BACKOFF_START_S
         self._last_ritual_error: str | None = None
 
@@ -69,12 +84,41 @@ class ServiceLoop:
         done = 0
         while iterations is None or done < iterations:
             self._receive()
+            self._drain()
             self._tick()
             done += 1
 
-    def _receive(self) -> None:
+    def _load_offset(self) -> int | None:
+        if self._offsets is None:
+            return None
         try:
-            batch = self._channel.poll(self._offset, POLL_TIMEOUT_S)
+            return self._offsets.load()
+        except LifeOSError as error:  # se empieza sin offset: Telegram reenvía lo no confirmado
+            self._log(f"telegram: {error}")
+            return None
+
+    def _advance(self, offset: int) -> None:
+        # DT-07: se guarda ANTES de atender. Una caída a mitad pierde como mucho ese mensaje,
+        # nunca lo repite (una captura duplicada en el Inbox es peor que pedir que lo reenvíe).
+        self._offset = offset
+        if self._offsets is None:
+            return
+        try:
+            self._offsets.save(offset)
+        except LifeOSError as error:
+            self._log(f"telegram: {error}")
+
+    def _drain(self) -> None:
+        try:
+            self._bot.drain()
+        except Exception as error:
+            text = str(error) if isinstance(error, LifeOSError) else type(error).__name__
+            self._log(f"voz: {text}")
+
+    def _receive(self) -> None:
+        timeout = BUSY_POLL_TIMEOUT_S if self._bot.busy else POLL_TIMEOUT_S
+        try:
+            batch = self._channel.poll(self._offset, timeout)
         except LifeOSError as error:
             self._log(f"telegram: {error}; reintento en {self._backoff:.0f} s")
             self._sleep(self._backoff)
@@ -83,7 +127,7 @@ class ServiceLoop:
         self._backoff = BACKOFF_START_S
         for message in batch:
             # El offset avanza antes de atender: un mensaje que falla no se repite sin fin.
-            self._offset = message.update_id + 1
+            self._advance(message.update_id + 1)
             try:
                 self._bot.handle(message)
             except LifeOSError as error:
@@ -149,6 +193,8 @@ def main(
     except LifeOSError as error:  # p. ej., Telegram no responde en --descubrir
         _stderr(f"Error: {error}")
         return EXIT_CONFIG
+    # Un solo hilo de trabajo para la voz (DT-04): el modelo de Whisper no es seguro entre hilos.
+    worker = ThreadPoolExecutor(max_workers=1, thread_name_prefix="lifeos-voz")
     bot = OwnerBot(
         service.channel,
         service.owner_chat_id,
@@ -158,23 +204,29 @@ def main(
         audit=service.runtime.audit_log,
         transcriber=service.transcriber,
         fingerprint_key=service.fingerprint_key,
+        voice_worker=worker,
     )
     try:
         service.lock.__enter__()
     except LifeOSError as error:  # otro servicio en marcha
+        worker.shutdown(wait=False)
         _stderr(f"Error: {error}")
         return EXIT_RUNNING
     except OSError as error:
+        worker.shutdown(wait=False)
         _stderr(f"Error de configuración: no se pudo crear el candado ({type(error).__name__})")
         return EXIT_CONFIG
     try:
         print("lifeos-servicio en marcha. Ctrl+C para detener.", file=stdout, flush=True)
-        ServiceLoop(service.channel, bot, service.rituals).run(
-            iterations=1 if args.una_vez else None
-        )
+        loop = ServiceLoop(service.channel, bot, service.rituals, offsets=service.offsets)
+        loop.run(iterations=1 if args.una_vez else None)
+        if args.una_vez:  # diagnóstico: se espera a la voz pendiente para responderla
+            worker.shutdown(wait=True)
+            bot.drain()
     except KeyboardInterrupt:  # pragma: no cover - parada manual
         pass
     finally:
+        worker.shutdown(wait=False, cancel_futures=True)
         service.lock.__exit__(None, None, None)
     return EXIT_OK
 
