@@ -7,6 +7,7 @@ import { App } from "../App";
 import { block, briefing, fail, installFakeApi, ok, week, XSS } from "../test/fakeApi";
 import { AgentsView } from "./AgentsView";
 import { HistoryView } from "./HistoryView";
+import { OfficeView } from "./OfficeView";
 import { TasksView } from "./TasksView";
 import { TodayView } from "./TodayView";
 import { WeekView } from "./WeekView";
@@ -48,9 +49,61 @@ describe("App y sesión", () => {
     const today = await screen.findByRole("tab", { name: "Hoy" });
     expect(today).toHaveAttribute("aria-selected", "true");
     today.focus();
-    await user.keyboard("{ArrowRight}");
+    await user.keyboard("{ArrowRight}{ArrowRight}"); // Hoy → Oficina → Semana
     expect(screen.getByRole("tab", { name: "Semana" })).toHaveAttribute("aria-selected", "true");
     expect(await screen.findByRole("heading", { name: /Semana 2026-W45/ })).toBeInTheDocument();
+  });
+});
+
+describe("Oficina", () => {
+  const agents: Agents = {
+    month: "2026-11",
+    agents: [],
+    plan_owner: "jefe",
+    forbidden_write: [],
+    restricted_read: [],
+    usage_malformed: 0,
+  };
+
+  it("describe en texto quién está en la oficina con los datos reales", async () => {
+    const work = block({ title: "Informe de redes", span: "09:00–10:30" });
+    installFakeApi({
+      "GET /api/hoy": ok(briefing({ current: work, work: [work], checkins: 1 })),
+      "GET /api/agentes": ok(agents),
+    });
+    render(<OfficeView />);
+    const list = await screen.findByRole("list", { name: "Quién está en la oficina" });
+    expect(await within(list).findByText(/Trabajando en Informe de redes/)).toBeInTheDocument();
+    expect(within(list).getByText(/Check-ins de hoy: 1|Te acompaña/)).toBeInTheDocument();
+  });
+
+  it("un personaje abre su vista desde la lista (teclado)", async () => {
+    installFakeApi({ "GET /api/hoy": ok(briefing()), "GET /api/agentes": ok(agents), "GET /api/semana": ok(week()) });
+    const user = userEvent.setup();
+    render(<App />);
+    await user.click(await screen.findByRole("tab", { name: "Oficina" }));
+    const list = await screen.findByRole("list", { name: "Quién está en la oficina" });
+    await user.click(within(list).getByRole("button", { name: /Jefe/ }));
+    await waitFor(() =>
+      expect(screen.getByRole("tab", { name: "Semana" })).toHaveAttribute("aria-selected", "true"),
+    );
+  });
+
+  it("los chats se recuerdan al volver a abrir la vista (DT-18)", async () => {
+    installFakeApi({
+      "GET /api/hoy": ok(briefing()),
+      "POST /api/checkins": {
+        status: 201,
+        body: { ok: true, data: { kind: "nota", message: "Anotado.", micro_step: null, adjustment: null, path: "Diario/2026-11-02.md", capture: null, ai_fallback: false, readable: true } },
+      },
+    });
+    const user = userEvent.setup();
+    const first = render(<TodayView />);
+    await user.click(await screen.findByRole("button", { name: "Enviar check-in" }));
+    await screen.findByText(/Anotado/);
+    first.unmount();
+    render(<TodayView />);
+    expect(await screen.findByRole("button", { name: "Borrar conversación" })).toBeInTheDocument();
   });
 
   it("cerrar sesión vuelve a la pantalla de acceso", async () => {

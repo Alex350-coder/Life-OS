@@ -1,7 +1,8 @@
 import { useState, type FormEvent } from "react";
 import { post } from "../api/client";
 import type { CheckInResult, PlanBlock } from "../api/types";
-import { ChatLog, type ChatMessage } from "../components/ChatLog";
+import { ChatLog } from "../components/ChatLog";
+import { useStoredChat } from "../components/useStoredChat";
 import { coachReply } from "../components/chatFormat";
 
 // Estados del check-in (domain/coach.py CheckInState). La respuesta la decide el Coach.
@@ -20,7 +21,7 @@ type Props = {
 };
 
 export function CoachChat({ work, onRecorded }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { messages, add: say, clear } = useStoredChat("lifeos.chat.coach");
   const [text, setText] = useState("");
   const [state, setState] = useState<(typeof STATES)[number][0]>("nota");
   const [task, setTask] = useState("");
@@ -31,8 +32,6 @@ export function CoachChat({ work, onRecorded }: Props) {
   // Si la tarea elegida ya no está en el plan (tras recargar), no se envía una tarea oculta.
   const chosenTask = tasks.some((b) => b.task_id === task) ? task : "";
 
-  const say = (author: ChatMessage["author"], lines: string[], isError = false) =>
-    setMessages((current) => [...current, { id: current.length + 1, author, lines, isError }]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -61,7 +60,7 @@ export function CoachChat({ work, onRecorded }: Props) {
   return (
     <section aria-labelledby="coach-heading" className="card">
       <h2 id="coach-heading">Chat con el Coach</h2>
-      <ChatLog label="Conversación con el Coach" messages={messages} />
+      <ChatLog label="Conversación con el Coach" messages={messages} onClear={clear} />
       <form onSubmit={handleSubmit}>
         <fieldset className="chat-form plain" disabled={isSending}>
           <legend className="visually-hidden">Nuevo check-in</legend>

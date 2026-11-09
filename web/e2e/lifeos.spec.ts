@@ -152,6 +152,20 @@ test("cierre: la vista previa no cambia nada y confirmar lo aplica", async ({ pa
   expect(problems).toEqual([]);
 });
 
+test("la oficina dibuja la escena, se describe en texto y abre las vistas", async ({ page }) => {
+  const problems = failOnDialogsAndCsp(page);
+  await page.goto("/#oficina");
+  const list = page.getByRole("list", { name: "Quién está en la oficina" });
+  await expect(list).toContainText("Coach");
+  await expect(page.locator("canvas.office-canvas")).toBeVisible();
+  await page.waitForTimeout(400); // unos fotogramas de la animación
+  await page.screenshot({ path: "test-results/oficina.png", fullPage: true });
+  await expectAccessible(page);
+  await list.getByRole("button", { name: /Jefe/ }).click();
+  await expect(page.getByRole("tab", { name: "Semana" })).toHaveAttribute("aria-selected", "true");
+  expect(problems).toEqual([]);
+});
+
 test("cerrar sesión invalida la cookie en el servidor", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Cerrar sesión" }).click();
