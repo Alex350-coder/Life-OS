@@ -5,7 +5,7 @@ La vista previa no escribe ni audita. Al confirmar, el propietario actualiza sus
 bloques no realizados.
 """
 
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytest
 
@@ -199,3 +199,20 @@ def test_failure_midway_reports_what_was_written(
     assert ("cierre", str(MONDAY), AuditResult.ERROR) in [
         (r.action, r.target, r.result) for r in audit.records
     ]
+
+
+@pytest.mark.parametrize("hour", ["00:30", "03:59"])
+def test_closing_after_midnight_still_closes_the_day_that_ended(
+    vault: FilesystemVault, audit: MemoryAuditLog, seeded: None, hour: str
+) -> None:
+    # DT-10: el propietario cierra a las 00:30 el día que terminó; antes saltaba al día nuevo.
+    tuesday_night = at(MON, hour) + timedelta(days=1)
+    preview = _closing(vault, audit, tuesday_night).preview(ANSWERS)
+    assert preview.path == MONDAY
+
+
+def test_from_four_in_the_morning_the_new_day_is_closed(
+    vault: FilesystemVault, audit: MemoryAuditLog, seeded: None
+) -> None:
+    with pytest.raises(NoDailyPlanError):
+        _closing(vault, audit, at(MON, "04:00") + timedelta(days=1)).preview(ANSWERS)

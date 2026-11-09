@@ -15,7 +15,7 @@ Las tareas sin respuesta no cambian nunca. Son operaciones del propietario sobre
 import uuid
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from datetime import date, time
+from datetime import date, time, timedelta
 from functools import partial
 from zoneinfo import ZoneInfo
 
@@ -43,6 +43,7 @@ from lifeos.ports.vault import NoteNotFoundError, VaultPath, VaultStore
 
 OWNER = "propietario"
 CLOSING_SECTION = "cierre"
+DAY_ROLLOVER = time(4, 0)  # antes de esta hora local, el cierre es del día anterior
 
 
 class ClosingIncompleteError(ApplicationError):
@@ -108,7 +109,9 @@ class DailyClosing:
         except NoteNotFoundError:
             horario = None
         zone = schedule_zone(horario, self._configured_zone)
-        day = self._clock.now().astimezone(zone).date()
+        local = self._clock.now().astimezone(zone)
+        # DT-10: de madrugada todavía se cierra el día que acaba de terminar.
+        day = local.date() - timedelta(days=1) if local.time() < DAY_ROLLOVER else local.date()
         path = VaultPath.parse(daily_path(day))
         try:
             text = self._vault.read(path).text
