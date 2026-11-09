@@ -8,6 +8,7 @@ requires-python = ">=3.12"
 # Fase 3: tzdata da a `zoneinfo` la base de zonas IANA en Windows (no tiene una del sistema).
 # Fase 5 (ADR-0012): FastAPI y uvicorn, usados solo en la capa `web` (tests/test_architecture.py).
 dependencies = [
+    "cryptography>=46,<47",
     "fastapi>=0.162,<1",
     "pydantic>=2.9,<3",
     "pyyaml>=6.0.2,<7",
@@ -24,6 +25,7 @@ voz = ["faster-whisper>=1.2,<2", "av>=11,<19"]
 lifeos = "lifeos.cli.main:main"
 lifeos-web = "lifeos.web.server:main"
 lifeos-servicio = "lifeos.service.main:main"
+lifeos-respaldo = "lifeos.cli.backup:main"
 
 [build-system]
 requires = ["uv_build>=0.11.18,<0.12.0"]

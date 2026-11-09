@@ -17,6 +17,7 @@ from types import MappingProxyType
 from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from lifeos.adapters.encrypted_backup import EncryptedVaultBackup
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.adapters.json_state import JsonOffsetStore, JsonRitualState
 from lifeos.adapters.jsonl_logs import (
@@ -47,6 +48,7 @@ from lifeos.application.permissions import (
 )
 from lifeos.application.rituals import RitualRunner
 from lifeos.application.tools import ToolRegistry
+from lifeos.ports.backup import VaultBackup
 from lifeos.ports.chat import ChatChannel
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import (
@@ -341,3 +343,18 @@ def build_service(settings: Settings, *, clock: Clock | None = None) -> ServiceR
         lock=ProcessLock(state_dir / "servicio.lock"),
         offsets=JsonOffsetStore(state_dir / "telegram.json"),
     )
+
+
+BACKUP_DIR_ENV = "LIFEOS_BACKUP_DIR"
+# Opcional, para un respaldo programado. Es el nombre de la variable, no una frase.
+BACKUP_PASSPHRASE_ENV = "LIFEOS_BACKUP_PASSPHRASE"  # noqa: S105  # nosec B105
+
+
+def vault_backup() -> VaultBackup:
+    return EncryptedVaultBackup()
+
+
+def backup_dir(settings: Settings) -> Path:
+    """Fuera de OneDrive por defecto: un respaldo en la misma nube que la bóveda no protege de
+    una sincronización que borra o corrompe."""
+    return Path(settings.environ.get(BACKUP_DIR_ENV) or Path.home() / "LifeOS-Respaldos")
