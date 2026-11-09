@@ -1,7 +1,7 @@
 """Propuestas de ajuste del Coach al Jefe (F4-T04, agente-coach.md): líneas de check-in
 analizables de forma determinista, sin campos en línea ni permisos nuevos."""
 
-from datetime import time
+from datetime import datetime, time
 
 import pytest
 
@@ -9,10 +9,13 @@ from lifeos.domain.adjustments import (
     Adjustment,
     AdjustmentKind,
     adjustment_entry,
+    matching_plan,
     parse_adjustments,
     pending,
 )
+from lifeos.domain.capacity import Interval
 from lifeos.domain.errors import ValidationError
+from lifeos.domain.plan import Block, BlockKind
 from lifeos.domain.schedule import TimeRange
 from lifeos.domain.sections import only_inserted_in_section
 from tests.daily_builders import monday_note
@@ -133,3 +136,28 @@ def test_pending_filters_by_moment_in_the_schedule_zone() -> None:
 
 def test_moment_is_local_to_the_day() -> None:
     assert MISSED.moment(LIMA) == at(MON, "09:40")
+
+
+# --- DT-11: solo cuentan los bloques perdidos que existen en el plan del día -----------------
+
+
+def _work(span: str, task: str) -> Block:
+    r = TimeRange.parse(span)
+    start = datetime.combine(MON, time(r.start // 60, r.start % 60), LIMA)
+    end = datetime.combine(MON, time(r.end // 60, r.end % 60), LIMA)
+    return Block(BlockKind.TRABAJO, "Trabajo", Interval(start, end), tid(task))
+
+
+def test_missed_blocks_that_match_the_plan_are_kept() -> None:
+    kept, dropped = matching_plan((MISSED, REDUCE), (_work("08:00–09:30", "t-aaaaaa"),), LIMA)
+    assert kept == (MISSED, REDUCE)
+    assert dropped == ()
+
+
+@pytest.mark.parametrize(
+    "block", [_work("08:00–09:00", "t-aaaaaa"), _work("08:00–09:30", "t-bbbbbb")]
+)
+def test_missed_blocks_outside_the_plan_are_dropped(block: Block) -> None:
+    kept, dropped = matching_plan((MISSED, REDUCE), (block,), LIMA)
+    assert kept == (REDUCE,)
+    assert dropped == (MISSED,)

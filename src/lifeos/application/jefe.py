@@ -25,7 +25,13 @@ from zoneinfo import ZoneInfo
 from lifeos.application.plan_publication import PlanPublication, PlanRejectedError
 from lifeos.application.tasks import ApplicationError, TaskQuery
 from lifeos.application.tools import ActorContext, ToolRegistry
-from lifeos.domain.adjustments import Adjustment, adjustment_entry, parse_adjustments, pending
+from lifeos.domain.adjustments import (
+    Adjustment,
+    adjustment_entry,
+    matching_plan,
+    parse_adjustments,
+    pending,
+)
 from lifeos.domain.capacity import local_datetime, week_capacity
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.heuristic import propose, unplanned_after
@@ -46,6 +52,7 @@ from lifeos.domain.plan_note import (
     PlanNoteError,
     WeeklyNote,
     daily_path,
+    parse_daily_blocks,
     parse_weekly,
     revision_path,
     weekly_path,
@@ -203,8 +210,13 @@ class JefePlanner:
             versions.append(_Version(path, snapshot, _note(snapshot)))
         return versions
 
-    def _adjustments(self, actor: ActorContext, week: IsoWeek) -> tuple[Adjustment, ...]:
-        """Propuestas del Coach en las notas diarias de la semana (el Jefe lee `Diario/`)."""
+    def _adjustments(
+        self, actor: ActorContext, week: IsoWeek, zone: ZoneInfo
+    ) -> tuple[Adjustment, ...]:
+        """Propuestas del Coach en las notas diarias de la semana (el Jefe lee `Diario/`).
+
+        DT-11: un "bloque perdido" que no coincide con un bloque de trabajo de esa nota (tarea y
+        horario) no se aplica: nunca se replanifica trabajo que no estaba en el plan."""
         found: list[Adjustment] = []
         for day in week.days():
             try:
@@ -212,9 +224,14 @@ class JefePlanner:
             except NoteNotFoundError:
                 continue
             try:
-                found += parse_adjustments(text, day)
+                proposals = parse_adjustments(text, day)
+                blocks = parse_daily_blocks(text, day, zone)
             except ValidationError as error:
                 raise ApplicationError(f"{daily_path(day)}: {error.reason}") from error
+            except PlanNoteError as error:
+                raise ApplicationError(f"{daily_path(day)}: {error}") from error
+            kept, _dropped = matching_plan(proposals, blocks, zone)
+            found += kept
         return tuple(found)
 
     # --- Vista (solo lectura) ----------------------------------------------------------------
@@ -330,7 +347,10 @@ class JefePlanner:
         history = split_history(base.blocks, cutoff)
         floor = planning_floor(history, max(cutoff, now))
         everything = pending(
-            self._adjustments(actor, week), zone=schedule.zone, after=None, until=cutoff
+            self._adjustments(actor, week, schedule.zone),
+            zone=schedule.zone,
+            after=None,
+            until=cutoff,
         )
         # Se aplican todas las propuestas de la semana (un "reducir carga hoy" sigue valiendo en
         # una segunda revisión del mismo día); la nota lista solo las nuevas desde la anterior.
