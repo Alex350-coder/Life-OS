@@ -190,7 +190,7 @@ class GoogleCalendarWriter:
             }
             path = f"{self._events_path(calendar_id)}?{urlencode(query)}"
             response = self._api.call("GET", path)
-            if response.status == 404:
+            if response.status == 404 and token is None:
                 # El propietario borró el calendario: se olvida y se crea otro al publicar.
                 self._store.forget_calendar()
                 return ()

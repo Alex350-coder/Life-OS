@@ -148,16 +148,22 @@ class GoogleOAuth:
         )
         if not response.ok:
             raise CalendarAuthError(f"no se pudo completar la autorización: {response.describe()}")
-        refresh = _secret_field(response.data, "refresh_token")
         scope = response.data.get("scope")
         granted = set(scope.split()) if isinstance(scope, str) else set()
         if granted != {grant.scope}:
             # Más (o menos) de lo pedido: no se guarda y se revoca enseguida.
-            self._revoke_quietly(refresh)
+            revoked = self._revoke_quietly(response.data)
+            advice = (
+                ""
+                if revoked
+                else " No se pudo revocar ese acceso: quítalo en "
+                "https://myaccount.google.com/permissions."
+            )
             raise CalendarAuthError(
                 "Google concedió permisos distintos de los pedidos "
-                f"({len(granted)} scope(s)); no se guardó nada. Pide solo {grant.scope}"
+                f"({len(granted)} scope(s)); no se guardó nada. Pide solo {grant.scope}.{advice}"
             )
+        refresh = _secret_field(response.data, "refresh_token")
         return StoredToken(grant, refresh, grant.scope, now)
 
     # --- Uso ------------------------------------------------------------------------------------
@@ -193,27 +199,41 @@ class GoogleOAuth:
             return False
         raise CalendarError(f"Google no confirmó la revocación: {response.describe()}")
 
-    def _revoke_quietly(self, refresh: Secret) -> None:
+    def _revoke_quietly(self, data: dict[str, object]) -> bool:
+        """Revoca el token recibido (refresh o, si falta, access). True si Google lo confirmó;
+        si no, quien llama lo dice al propietario."""
+        token = data.get("refresh_token") or data.get("access_token")
+        if not isinstance(token, str) or not token:
+            return False
         try:
-            self._http.request("POST", self._endpoints.revoke, form={"token": refresh.reveal()})
+            response = self._http.request("POST", self._endpoints.revoke, form={"token": token})
         except CalendarError:
-            return  # el token no se guarda de todos modos; el error principal se informa arriba
+            return False
+        return response.ok
 
 
 class AccessTokens:
     """Access token en memoria para un permiso; se renueva antes de caducar."""
 
-    def __init__(self, oauth: GoogleOAuth, store: TokenStore, grant: Grant) -> None:
+    def __init__(
+        self,
+        oauth: GoogleOAuth,
+        store: TokenStore,
+        grant: Grant,
+        *,
+        monotonic: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._monotonic = monotonic
         self._oauth = oauth
         self._store = store
         self._grant = grant
         self._current: AccessToken | None = None
         self._lock = threading.Lock()
 
-    def get(self, monotonic: Callable[[], float] = time.monotonic) -> Secret:
+    def get(self) -> Secret:
         with self._lock:
             current = self._current
-            if current is not None and current.expires_at - EXPIRY_MARGIN_S > monotonic():
+            if current is not None and current.expires_at - EXPIRY_MARGIN_S > self._monotonic():
                 return current.value
             stored = self._store.load(self._grant)
             if stored is None:
@@ -284,13 +304,21 @@ def run_loopback_flow(
     verifier = secrets.token_urlsafe(64)  # 86 caracteres: dentro de 43–128 (RFC 7636)
     # Con hilos y un tiempo máximo por conexión: una conexión abierta y callada (p. ej., la
     # precarga del navegador) no bloquea la redirección real ni el cierre.
-    server = ThreadingHTTPServer((LOOPBACK, 0), _handler(callback))
+    try:
+        server = ThreadingHTTPServer((LOOPBACK, 0), _handler(callback))
+    except OSError as error:
+        raise CalendarError(
+            f"no se pudo abrir el puerto local para la autorización ({type(error).__name__})"
+        ) from None
     server.daemon_threads = True
     redirect_uri = f"http://{LOOPBACK}:{server.server_address[1]}/"
     thread = threading.Thread(target=server.serve_forever, args=(0.1,), daemon=True)
     thread.start()
     try:
-        open_browser(oauth.authorization_url(grant, redirect_uri, callback.state, verifier))
+        try:
+            open_browser(oauth.authorization_url(grant, redirect_uri, callback.state, verifier))
+        except OSError as error:
+            raise CalendarError(f"no se pudo abrir el navegador ({type(error).__name__})") from None
         if not callback.done.wait(timeout_s):
             raise CalendarAuthError("no llegó la respuesta de Google a tiempo; vuelve a intentarlo")
     finally:

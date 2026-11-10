@@ -48,6 +48,7 @@ class GrantStatus:
     scope: str
     connected: bool
     obtained: datetime | None
+    problem: str | None = None  # p. ej., archivo del token dañado
 
 
 @dataclass(frozen=True, slots=True)

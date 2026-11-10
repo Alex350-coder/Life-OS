@@ -174,6 +174,15 @@ def _state_dir(settings: Settings) -> Path:
     return Path(settings.environ.get(STATE_DIR_ENV) or settings.project_root / DEFAULT_STATE_DIR)
 
 
+GOOGLE_TOKENS_DIR_ENV = "LIFEOS_TOKENS_DIR"
+
+
+def _tokens_dir(settings: Settings) -> Path:
+    """Los refresh tokens van fuera del proyecto (que puede estar en OneDrive): por defecto en
+    `~/.lifeos`, que no se sincroniza."""
+    return Path(settings.environ.get(GOOGLE_TOKENS_DIR_ENV) or Path.home() / ".lifeos")
+
+
 def _google_secret(settings: Settings) -> Secret | None:
     raw = settings.environ.get(GOOGLE_CLIENT_SECRET_ENV) or ""
     return Secret(raw) if raw.strip() else None
@@ -198,7 +207,7 @@ def _calendar_adapters(settings: Settings) -> tuple[BusyReader | None, CalendarW
     oauth = _google_oauth(settings)
     if oauth is None:
         return None, None
-    store = TokenStore(_state_dir(settings))
+    store = TokenStore(_tokens_dir(settings))
     base = settings.environ.get(GOOGLE_API_ENV) or API_BASE
     try:
         reader = (
@@ -230,7 +239,7 @@ def calendar_access(settings: Settings, *, clock: Clock | None = None) -> Calend
             ("falta el id del cliente OAuth de escritorio de Google (ver README del proyecto)",),
         )
     now = (clock or SystemClock(UTC)).now
-    return GoogleCalendarAccess(oauth, TokenStore(_state_dir(settings)), now=now)
+    return GoogleCalendarAccess(oauth, TokenStore(_tokens_dir(settings)), now=now)
 
 
 def _jefe(

@@ -49,6 +49,7 @@ class Calendar:
             "LIFEOS_VAULT_PATH": str(vault),
             "LIFEOS_LOGS_DIR": str(root / "logs"),
             "LIFEOS_STATE_DIR": str(self.state),
+            "LIFEOS_TOKENS_DIR": str(self.state),
             "GOOGLE_CLIENT_ID": CLIENT_ID,
             "LIFEOS_GOOGLE_OAUTH": google.oauth_base,
             "LIFEOS_GOOGLE_API": google.api_base,

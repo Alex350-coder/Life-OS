@@ -53,8 +53,8 @@ def _write_private(path: Path, data: object) -> None:
         path.parent.mkdir(parents=True, exist_ok=True)
         fd, temp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.stem}-", suffix=".tmp")
         try:
-            Path(temp).chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600 donde el sistema lo respeta
             with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                Path(temp).chmod(stat.S_IRUSR | stat.S_IWUSR)  # 600 donde el sistema lo respeta
                 json.dump(data, handle, ensure_ascii=False, indent=1)
                 handle.flush()
                 os.fsync(handle.fileno())
@@ -152,4 +152,9 @@ class TokenStore:
         _write_private(self._dir / CALENDAR_FILE, {"id": calendar_id})
 
     def forget_calendar(self) -> None:
-        (self._dir / CALENDAR_FILE).unlink(missing_ok=True)
+        try:
+            (self._dir / CALENDAR_FILE).unlink(missing_ok=True)
+        except OSError as error:
+            raise CalendarError(
+                f"no se pudo borrar {CALENDAR_FILE}: {type(error).__name__}"
+            ) from None

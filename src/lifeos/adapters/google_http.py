@@ -150,8 +150,8 @@ class GoogleHttp:
         except urllib.error.HTTPError as error:
             try:
                 data = _parse(_read(error, MAX_ERROR_BYTES))
-            except CalendarError:
-                data = {}  # un cuerpo de error ilegible no oculta el código HTTP
+            except (CalendarError, OSError, http.client.HTTPException):
+                data = {}  # un cuerpo de error ilegible o cortado no oculta el código HTTP
             finally:
                 error.close()
             return Response(error.code, data)

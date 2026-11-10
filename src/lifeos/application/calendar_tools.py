@@ -37,7 +37,7 @@ class PartialCalendarSyncError(CalendarError):
     def __init__(self, done: int, cause: Exception) -> None:
         super().__init__(
             f"publicación en el calendario incompleta: {done} cambio(s) hecho(s) antes del fallo "
-            f"({type(cause).__name__}); repite la publicación: no crea duplicados"
+            f"({cause}); repite la publicación: no crea duplicados"
         )
         self.done = done
 
@@ -105,7 +105,7 @@ class CalendarTools:
             return ()
         try:
             return self._reader.busy(start, end)
-        except CalendarError as error:
+        except Exception as error:
             self._log(actor, CALENDAR_READ_TOOL, target, AuditResult.ERROR, type(error).__name__)
             raise
 
@@ -150,7 +150,7 @@ class CalendarTools:
         for done, (name, operation) in enumerate(steps):
             try:
                 self._write(actor, name, operation)
-            except CalendarError as error:
+            except Exception as error:
                 if done:
                     raise PartialCalendarSyncError(done, error) from error
                 raise

@@ -34,6 +34,7 @@ def env(project: Path, **extra: str) -> dict[str, str]:
     return {
         "LIFEOS_VAULT_PATH": str(project / "vault"),
         "LIFEOS_STATE_DIR": str(project / "state"),
+        "LIFEOS_TOKENS_DIR": str(project / "state"),
         **extra,
     }
 

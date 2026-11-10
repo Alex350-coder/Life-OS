@@ -41,7 +41,11 @@ class GoogleCalendarAccess:
     def status(self) -> tuple[GrantStatus, ...]:
         found = []
         for grant in Grant:
-            token = self._store.load(grant)
+            try:
+                token = self._store.load(grant)
+            except CalendarError as error:
+                found.append(GrantStatus(grant.value, grant.scope, False, None, str(error)))
+                continue
             found.append(
                 GrantStatus(
                     grant.value,
@@ -58,10 +62,10 @@ class GoogleCalendarAccess:
         removed: list[str] = []
         failures: list[str] = []
         for grant in Grant:
-            token = self._store.load(grant)
-            if token is None:
-                continue
             try:
+                token = self._store.load(grant)
+                if token is None:
+                    continue
                 (revoked if self._oauth.revoke(token) else invalid).append(grant.value)
             except CalendarError as error:
                 failures.append(f"{grant.value}: {error}")
@@ -69,10 +73,11 @@ class GoogleCalendarAccess:
             if self._store.remove(grant):
                 removed.append(grant.value)
         if failures:
+            done = f" Ya revocado: {', '.join(revoked)}." if revoked else ""
             raise CalendarError(
                 "no se pudo revocar en Google (" + "; ".join(failures) + "); el token local se "
-                "conserva para reintentarlo. También puedes quitar el acceso en "
-                "https://myaccount.google.com/permissions"
+                "conserva para reintentarlo (si el archivo está dañado, bórralo). Quita también "
+                f"el acceso en https://myaccount.google.com/permissions.{done}"
             )
         # El id del calendario Life OS se conserva: al volver a conectar se reutiliza (si ya no
         # es accesible, el adaptador lo detecta con un 404 y crea otro).

@@ -77,7 +77,8 @@ def _status_line(status: GrantStatus) -> str:
         if status.connected and status.obtained is not None
         else "sin conectar"
     )
-    return f"- {status.grant}: {state} ({status.scope})"
+    problem = f" — {printable(status.problem)}" if status.problem else ""
+    return f"- {status.grant}: {state} ({status.scope}){problem}"
 
 
 def _span(zone: ZoneInfo, start: datetime, end: datetime) -> str:
