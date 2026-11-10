@@ -22,6 +22,7 @@ from datetime import datetime, timedelta
 from typing import Protocol
 from zoneinfo import ZoneInfo
 
+from lifeos.application.calendar_tools import CalendarTools
 from lifeos.application.plan_publication import PlanPublication, PlanRejectedError
 from lifeos.application.tasks import ApplicationError, TaskQuery
 from lifeos.application.tools import ActorContext, ToolRegistry
@@ -35,6 +36,7 @@ from lifeos.domain.adjustments import (
 )
 from lifeos.domain.capacity import local_datetime, week_capacity
 from lifeos.domain.errors import ValidationError
+from lifeos.domain.external import ExternalBusy
 from lifeos.domain.heuristic import propose, unplanned_after
 from lifeos.domain.horario_note import HORARIO_NOTE, parse_horario
 from lifeos.domain.load import DayLoad, day_loads
@@ -61,6 +63,7 @@ from lifeos.domain.plan_note import (
 from lifeos.domain.replan import adjust_context, planning_floor, split_history
 from lifeos.domain.schedule import MINUTES_PER_DAY, Schedule
 from lifeos.domain.weeks import IsoWeek
+from lifeos.ports.calendar import CalendarError
 from lifeos.ports.clock import Clock
 from lifeos.ports.vault import NoteNotFoundError, Snapshot, VaultPath
 
@@ -97,6 +100,7 @@ class _Revision:
     history: tuple[Block, ...]
     adjustments: tuple[Adjustment, ...]
     context: PlanningContext
+    warning: str | None = None  # el calendario externo no respondió (solo al proponer)
 
 
 @dataclass(frozen=True, slots=True)
@@ -137,11 +141,13 @@ class JefePlanner:
         *,
         drafter: PlanDrafter | None = None,
         configured_zone: str | None = None,
+        calendar: CalendarTools | None = None,
     ) -> None:
         self._tools = tools
         self._clock = clock
         self._drafter = drafter
         self._configured_zone = configured_zone
+        self._calendar = calendar
 
     @property
     def has_drafter(self) -> bool:
@@ -170,16 +176,47 @@ class JefePlanner:
             )
         return schedule
 
+    def _external(
+        self, actor: ActorContext, schedule: Schedule, week: IsoWeek, *, strict: bool
+    ) -> tuple[tuple[ExternalBusy, ...], str | None]:
+        """Intervalos ocupados del calendario externo (ADR-0017).
+
+        Al proponer, un calendario que no responde deja una alerta y el plan sigue sin esos
+        eventos. Al aprobar (`strict`) falla cerrado: no se aprueba sin comprobarlos."""
+        if self._calendar is None or not self._calendar.can_read:
+            return (), None
+        days = week.days()
+        start = local_datetime(days[0], 0, schedule.zone)
+        end = local_datetime(days[-1], MINUTES_PER_DAY, schedule.zone)
+        try:
+            return self._calendar.busy(actor, start, end), None
+        except CalendarError as error:
+            if strict:
+                raise ApplicationError(
+                    f"{error}; la aprobación necesita comprobar los eventos externos: reinténtalo "
+                    "o desconecta el calendario con 'lifeos-calendario revocar'"
+                ) from None
+            return (), f"Google Calendar no disponible ({error}): no se comprobaron los eventos"
+
     def _context(
-        self, actor: ActorContext, schedule: Schedule, week: IsoWeek, now: datetime
+        self,
+        actor: ActorContext,
+        schedule: Schedule,
+        week: IsoWeek,
+        now: datetime,
+        external: tuple[ExternalBusy, ...] = (),
     ) -> PlanningContext:
         located = self._tools.listar_tareas(actor, TaskQuery())
-        return build_context(schedule, week, (item.task for item in located), now=now)
+        return build_context(
+            schedule, week, (item.task for item in located), now=now, external=external
+        )
 
     def context(self, week: IsoWeek, *, now: datetime | None = None) -> PlanningContext:
         """Contexto de planificación tal como lo vería ahora el Jefe."""
         actor = self.new_actor()
-        return self._context(actor, self._schedule(actor), week, now or self._clock.now())
+        schedule = self._schedule(actor)
+        external, _warning = self._external(actor, schedule, week, strict=False)
+        return self._context(actor, schedule, week, now or self._clock.now(), external)
 
     def _load_advice(self, actor: ActorContext, schedule: Schedule, now: datetime) -> LoadAdvice:
         """Cierres de los últimos días (el Jefe ya lee `Diario/`), para la carga adaptativa."""
@@ -301,8 +338,9 @@ class JefePlanner:
         # DT-01: solo la propuesta usa el foco ajustado. La aprobación valida contra el límite del
         # propietario, que es un techo: un plan más ligero siempre lo cumple.
         adapted = replace(schedule, limits=replace(schedule.limits, focus_max=advice.focus_max))
-        context = self._context(actor, adapted, target, now)
-        proposal = self._draft(context, origin, actor)
+        external, warning = self._external(actor, schedule, target, strict=False)
+        context = self._context(actor, adapted, target, now, external)
+        proposal = _with_alert(self._draft(context, origin, actor), warning)
         justification = "; ".join(p for p in (proposal.justification, advice.reason) if p)
         publication = PlanPublication(
             proposal=replace(proposal, justification=justification),
@@ -333,7 +371,8 @@ class JefePlanner:
         now = self._clock.now()
         # Revalidación con la bóveda y la hora actuales: un plan con bloques ya pasados (o con
         # una fecha de generación editada) no se aprueba; hay que volver a proponerlo.
-        context = self._context(actor, schedule, target, now)
+        external, _ = self._external(actor, schedule, target, strict=True)
+        context = self._context(actor, schedule, target, now, external)
         unplanned, alerts = unplanned_after(context, note.blocks)
         proposal = PlanProposal(
             week=target,
@@ -364,6 +403,7 @@ class JefePlanner:
         *,
         cutoff: datetime,
         now: datetime,
+        strict: bool,
     ) -> _Revision:
         history = split_history(base.blocks, cutoff)
         floor = planning_floor(history, max(cutoff, now))
@@ -376,13 +416,14 @@ class JefePlanner:
         # Se aplican todas las propuestas de la semana (un "reducir carga hoy" sigue valiendo en
         # una segunda revisión del mismo día); la nota lista solo las nuevas desde la anterior.
         new = pending(everything, zone=schedule.zone, after=base.cutoff, until=cutoff)
+        external, warning = self._external(actor, schedule, week, strict=strict)
         context = adjust_context(
-            self._context(actor, schedule, week, floor),
+            self._context(actor, schedule, week, floor, external),
             schedule,
             history=history,
             adjustments=everything,
         )
-        return _Revision(history, new, context)
+        return _Revision(history, new, context, warning)
 
     def replanificar(
         self, week: IsoWeek | None = None, *, origin: PlanOrigin = PlanOrigin.HEURISTICA
@@ -407,9 +448,11 @@ class JefePlanner:
         week_end = local_datetime(target.days()[-1], MINUTES_PER_DAY, schedule.zone)
         if cutoff >= week_end:
             raise ApplicationError(f"la semana {target} ya terminó: planifica la siguiente")
-        data = self._revision_data(actor, schedule, target, base.note, cutoff=cutoff, now=now)
+        data = self._revision_data(
+            actor, schedule, target, base.note, cutoff=cutoff, now=now, strict=False
+        )
         publication = PlanPublication(
-            proposal=self._draft(data.context, origin, actor),
+            proposal=_with_alert(self._draft(data.context, origin, actor), data.warning),
             context=data.context,
             status=PlanStatus.PROPUESTO,
             generated=now,
@@ -434,7 +477,9 @@ class JefePlanner:
                 f"{latest.path} no revisa un plan aprobado de la cadena: vuelve a replanificar"
             )
         now = self._clock.now()
-        data = self._revision_data(actor, schedule, week, base.note, cutoff=note.cutoff, now=now)
+        data = self._revision_data(
+            actor, schedule, week, base.note, cutoff=note.cutoff, now=now, strict=True
+        )
         blocks = note.plan_blocks()
         unplanned, alerts = unplanned_after(data.context, blocks)
         proposal = PlanProposal(
@@ -471,6 +516,12 @@ class JefePlanner:
         return PlanOutcome(
             publication.proposal, (), paths[-1], publication.status, publication.context.zone
         )
+
+
+def _with_alert(proposal: PlanProposal, warning: str | None) -> PlanProposal:
+    if warning is None:
+        return proposal
+    return replace(proposal, alerts=(*proposal.alerts, warning))
 
 
 def _rendered(adjustments: tuple[Adjustment, ...]) -> tuple[str, ...]:
