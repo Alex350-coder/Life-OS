@@ -36,12 +36,13 @@ from lifeos.domain.adjustments import (
 )
 from lifeos.domain.capacity import local_datetime, week_capacity
 from lifeos.domain.errors import ValidationError
-from lifeos.domain.external import ExternalBusy
+from lifeos.domain.external import ExternalBusy, first_overlap
 from lifeos.domain.heuristic import propose, unplanned_after
 from lifeos.domain.horario_note import HORARIO_NOTE, parse_horario
 from lifeos.domain.load import DayLoad, day_loads
 from lifeos.domain.plan import (
     Block,
+    BlockKind,
     Conflict,
     PlanningContext,
     PlanOrigin,
@@ -131,6 +132,19 @@ class WeekView:
     blocks: tuple[Block, ...]
     load: tuple[DayLoad, ...]
     versions: int  # plan original más revisiones
+
+
+@dataclass(frozen=True, slots=True)
+class ExternalView:
+    """Intervalos ocupados externos de la semana y los bloques del plan vigente que pisan
+    (F7-T02). Solo lectura."""
+
+    week: IsoWeek
+    zone: ZoneInfo
+    path: str | None  # plan vigente, si existe
+    status: PlanStatus | None
+    external: tuple[ExternalBusy, ...]
+    clashes: tuple[tuple[Block, ExternalBusy], ...]
 
 
 class JefePlanner:
@@ -309,6 +323,26 @@ class JefePlanner:
             load=day_loads(week_capacity(schedule, target), blocks, schedule.zone),
             versions=len(chain),
         )
+
+    def eventos_externos(self, week: IsoWeek | None = None) -> ExternalView:
+        """Disponibilidad externa y choques con el plan vigente, sin escribir nada."""
+        if self._calendar is None or not self._calendar.can_read:
+            raise ApplicationError(
+                "Google Calendar no está conectado para lectura: usa "
+                "'lifeos-calendario conectar --lectura'"
+            )
+        actor = self.new_actor()
+        schedule = self._schedule(actor)
+        target = self._week(week, schedule)
+        external, _ = self._external(actor, schedule, target, strict=True)
+        view = self.semana(target)
+        clashes = tuple(
+            (block, hit)
+            for block in view.blocks
+            if block.kind is BlockKind.TRABAJO
+            and (hit := first_overlap(block.interval, external)) is not None
+        )
+        return ExternalView(target, schedule.zone, view.path, view.status, external, clashes)
 
     # --- Propuesta ------------------------------------------------------------------------
 
