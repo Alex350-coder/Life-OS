@@ -6,14 +6,15 @@ validador exige que el plan los contenga exactamente.
 
 import unicodedata
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date, datetime, timedelta
 from enum import StrEnum
 from types import MappingProxyType
 from zoneinfo import ZoneInfo
 
-from lifeos.domain.capacity import DayCapacity, Interval, week_capacity
+from lifeos.domain.capacity import DayCapacity, Interval, budget, subtract, week_capacity
 from lifeos.domain.errors import ValidationError
+from lifeos.domain.external import ExternalBusy, busy_on
 from lifeos.domain.ids import TaskId
 from lifeos.domain.schedule import Limits, RuleKind, Schedule
 from lifeos.domain.task import Task, TaskStatus
@@ -129,6 +130,7 @@ class ConflictCode(StrEnum):
     DEPENDENCIA = "dependencia"
     DESPUES_DE_FECHA_LIMITE = "despues_de_fecha_limite"
     HISTORIAL_ALTERADO = "historial_alterado"
+    EVENTO_EXTERNO = "evento_externo"  # pisa un intervalo ocupado del calendario (Fase 7)
 
 
 @dataclass(frozen=True, slots=True)
@@ -150,6 +152,8 @@ class PlanningContext:
     # Tareas sin id o sin campos obligatorios: no se pueden planificar y se informan.
     incomplete: tuple[Task, ...]
     not_before: datetime
+    # Intervalos ocupados de calendarios externos que tocan la semana (F7-T02, ADR-0017).
+    external: tuple[ExternalBusy, ...] = ()
 
     def __post_init__(self) -> None:
         # Copia de solo lectura: nadie puede cambiar las tareas tras validar.
@@ -168,8 +172,30 @@ def next_minute(moment: datetime) -> datetime:
     return whole if whole == moment else whole + timedelta(minutes=1)
 
 
+def _without_external(
+    days: tuple[DayCapacity, ...], schedule: Schedule, external: tuple[ExternalBusy, ...]
+) -> tuple[DayCapacity, ...]:
+    """Un intervalo ocupado externo se descuenta del tiempo libre como un compromiso fijo."""
+    adjusted = []
+    for capacity in days:
+        busy = busy_on(external, capacity.day, schedule.zone)
+        if not busy:
+            adjusted.append(capacity)
+            continue
+        free = subtract(capacity.free, (item.interval for item in busy), schedule.zone)
+        minutes = sum(interval.minutes for interval in free)
+        allowed = min(capacity.budget_minutes, budget(schedule, minutes))
+        adjusted.append(replace(capacity, free=free, budget_minutes=allowed))
+    return tuple(adjusted)
+
+
 def build_context(
-    schedule: Schedule, week: IsoWeek, tasks: Iterable[Task], *, now: datetime
+    schedule: Schedule,
+    week: IsoWeek,
+    tasks: Iterable[Task],
+    *,
+    now: datetime,
+    external: Iterable[ExternalBusy] = (),
 ) -> PlanningContext:
     if now.utcoffset() is None:
         raise ValidationError("ahora", now, "requiere zona horaria")
@@ -182,14 +208,22 @@ def build_context(
                 incomplete.append(task)
             continue
         by_id[task.id] = task
+    days = week.days()
+    relevant = tuple(
+        sorted(
+            (item for item in external if any(busy_on((item,), d, schedule.zone) for d in days)),
+            key=lambda item: item.interval.start.timestamp(),
+        )
+    )
     return PlanningContext(
         week=week,
         zone=schedule.zone,
         limits=schedule.limits,
-        days=week_capacity(schedule, week, not_before=now),
+        days=_without_external(week_capacity(schedule, week, not_before=now), schedule, relevant),
         tasks=MappingProxyType(by_id),
         incomplete=tuple(incomplete),
         not_before=now,
+        external=relevant,
     )
 
 
