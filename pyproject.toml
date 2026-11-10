@@ -26,6 +26,7 @@ lifeos = "lifeos.cli.main:main"
 lifeos-web = "lifeos.web.server:main"
 lifeos-servicio = "lifeos.service.main:main"
 lifeos-respaldo = "lifeos.cli.backup:main"
+lifeos-calendario = "lifeos.cli.calendar:main"
 
 [build-system]
 requires = ["uv_build>=0.11.18,<0.12.0"]
