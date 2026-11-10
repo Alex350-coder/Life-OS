@@ -132,6 +132,26 @@ uv run lifeos-respaldo restaurar RUTA.lorespaldo --destino C:\ruta\nueva   # nun
 - **Restaurar.** Solo escribe en una carpeta nueva o vacía. Rechaza rutas que intenten salir del destino. Tu bóveda real no se toca nunca.
 - **La frase no se guarda en ningún sitio.** Si la pierdes, el respaldo no se puede abrir. Para un respaldo programado, se puede poner en `LIFEOS_BACKUP_PASSPHRASE` dentro de `.env` (queda en claro en este PC).
 
+## Google Calendar (Fase 7; ADR-0017)
+Desactivado mientras falte `GOOGLE_CLIENT_ID` en `.env`. Para activarlo, una sola vez:
+1. En Google Cloud, crea un proyecto y habilita la **Google Calendar API**.
+2. Configura la pantalla de consentimiento en modo de pruebas y añade tu cuenta como usuario de prueba.
+3. Crea un **cliente OAuth de tipo "aplicación de escritorio"** y copia su id y su secreto en `GOOGLE_CLIENT_ID` y `GOOGLE_CLIENT_SECRET`.
+
+```bash
+uv run lifeos-calendario conectar --lectura            # solo disponibilidad (calendar.freebusy)
+uv run lifeos-calendario conectar --escritura          # solo su calendario "Life OS" (calendar.app.created)
+uv run lifeos-calendario estado                        # qué permisos están conectados
+uv run lifeos-calendario disponibilidad --semana 2026-W46   # ocupado y choques con el plan
+uv run lifeos-calendario publicar --semana 2026-W46         # muestra el cambio; no escribe
+uv run lifeos-calendario publicar --semana 2026-W46 --confirmar   # publica el plan aprobado
+uv run lifeos-calendario revocar                       # revoca en Google y borra los tokens locales
+```
+- **Lectura.** Solo intervalos ocupados de tu calendario principal, nunca títulos. `semana` los evita y los anota en `## Eventos externos` con la fuente y la confianza (*alta*; *media* si duran 12 h o más). `aprobar` los vuelve a leer: si Google no responde, no aprueba.
+- **Escritura.** Solo los bloques de trabajo de un plan **aprobado**, en un calendario propio "Life OS". Nunca toca tus eventos. Republicar no duplica nada: lo que sobra se borra y lo cambiado a mano se restaura.
+- **Permisos separados.** Cada `conectar` pide un único permiso. Si Google concede otros, el token se revoca y no se guarda. Los tokens viven en `state/` (fuera de Git).
+- **Revocar.** Google revoca los dos permisos juntos. Si quitas el acceso desde tu cuenta de Google, Life OS lo detecta en el siguiente uso y pide volver a conectar. En modo de pruebas, Google caduca el acceso a los 7 días: basta con volver a conectar.
+
 ## Carga adaptativa (DT-01)
 `semana` mira los cierres de los últimos 7 días. Con al menos 3 días cerrados, calcula cuánto cumpliste: hecha cuenta 1, avance 0,5 y no realizada 0. Según eso, la propuesta usa:
 - el 100 % de `foco_max_dia` si cumpliste el 80 % o más;
