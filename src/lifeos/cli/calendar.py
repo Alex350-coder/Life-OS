@@ -122,6 +122,8 @@ def _print_preview(preview: CalendarPreview, out: TextIO) -> None:
         span = _span(preview.zone, event.interval.start, event.interval.end)
         print(f"- borrar  {span} · {printable(event.title)}", file=out)
     print(f"Sin cambios: {sync.unchanged} evento(s).", file=out)
+    for warning in preview.warnings:
+        print(f"! Aviso: {printable(warning)}", file=out)
 
 
 def _publish(publisher: CalendarPublisher, week: IsoWeek | None, confirm: bool, out: TextIO) -> int:

@@ -19,7 +19,7 @@ import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from datetime import datetime
-from http.server import BaseHTTPRequestHandler, HTTPServer
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from lifeos.adapters.google_http import LOOPBACK, GoogleHttp, check_base_url
@@ -31,6 +31,7 @@ AUTH_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 TOKEN_URL = "https://oauth2.googleapis.com/token"  # noqa: S105  # nosec B105 - URL, no un token
 REVOKE_URL = "https://oauth2.googleapis.com/revoke"
 LOGIN_TIMEOUT_S = 300
+HANDLER_TIMEOUT_S = 5
 EXPIRY_MARGIN_S = 60
 MAX_EXPIRES_S = 24 * 3600
 _CLIENT_ID_SUFFIX = ".apps.googleusercontent.com"
@@ -245,6 +246,8 @@ class _Callback:
 
 def _handler(callback: _Callback) -> type[BaseHTTPRequestHandler]:
     class Handler(BaseHTTPRequestHandler):
+        timeout = HANDLER_TIMEOUT_S
+
         def log_message(self, format: str, *args: object) -> None:
             return  # la URL lleva el código de autorización: no se registra
 
@@ -279,7 +282,10 @@ def run_loopback_flow(
     """Abre el navegador, espera la redirección a 127.0.0.1 y canjea el código."""
     callback = _Callback(state=secrets.token_urlsafe(32))
     verifier = secrets.token_urlsafe(64)  # 86 caracteres: dentro de 43–128 (RFC 7636)
-    server = HTTPServer((LOOPBACK, 0), _handler(callback))
+    # Con hilos y un tiempo máximo por conexión: una conexión abierta y callada (p. ej., la
+    # precarga del navegador) no bloquea la redirección real ni el cierre.
+    server = ThreadingHTTPServer((LOOPBACK, 0), _handler(callback))
+    server.daemon_threads = True
     redirect_uri = f"http://{LOOPBACK}:{server.server_address[1]}/"
     thread = threading.Thread(target=server.serve_forever, args=(0.1,), daemon=True)
     thread.start()

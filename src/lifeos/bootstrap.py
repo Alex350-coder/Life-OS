@@ -332,7 +332,7 @@ def build_runtime(
         agents=agents,
         audit_reader=JsonlAuditReader(settings.logs_dir),
         calendar=calendar,
-        calendar_publisher=CalendarPublisher(jefe, calendar) if jefe is not None else None,
+        calendar_publisher=CalendarPublisher(jefe, calendar, clock) if jefe is not None else None,
     )
 
 

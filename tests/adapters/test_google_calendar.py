@@ -150,13 +150,20 @@ def event(event_id: str, *, key: str = ENTRY.key, status: str = "confirmed") -> 
     }
 
 
-def test_first_use_creates_the_life_os_calendar_once(
+def test_listing_never_creates_the_calendar(stub_server: StubServer, tmp_path: Path) -> None:
+    client, store = writer(stub_server, tmp_path)
+    assert client.list_entries(WEEK.render(), START, END) == ()
+    assert stub_server.received == []  # la vista previa no escribe nada en Google
+    assert store.calendar_id() is None
+
+
+def test_first_event_creates_the_life_os_calendar_once(
     stub_server: StubServer, tmp_path: Path
 ) -> None:
     client, store = writer(stub_server, tmp_path)
-    stub_server.replies += [reply({"id": CAL_ID}), reply({"items": []}), reply({"items": []})]
-    assert client.list_entries(WEEK.render(), START, END) == ()
-    client.list_entries(WEEK.render(), START, END)
+    stub_server.replies += [reply({"id": CAL_ID}), reply(event("e1")), reply(event("e2"))]
+    client.create(WEEK.render(), ENTRY)
+    client.create(WEEK.render(), ENTRY)
     assert store.calendar_id() == CAL_ID
     created = stub_server.received[0]
     assert (created.method, created.path) == ("POST", "/v1/calendars")

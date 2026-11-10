@@ -51,7 +51,7 @@ def publisher(
     jefe: JefePlanner, audit: MemoryAuditLog, writer: FakeCalendarWriter
 ) -> CalendarPublisher:
     calendar = CalendarTools(samples.effective(), audit, FakeClock(NOW), writer=writer)
-    return CalendarPublisher(jefe, calendar)
+    return CalendarPublisher(jefe, calendar, FakeClock(NOW))
 
 
 def test_nothing_is_published_without_a_plan(

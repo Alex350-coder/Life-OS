@@ -173,7 +173,10 @@ class GoogleCalendarWriter:
     ) -> tuple[PublishedEntry, ...]:
         if not _WEEK_RE.fullmatch(week_label):
             raise CalendarError("semana no válida")
-        calendar_id = self._calendar()
+        calendar_id = self._store.calendar_id()
+        if calendar_id is None:
+            # Leer nunca escribe: el calendario se crea con el primer evento publicado.
+            return ()
         entries: list[PublishedEntry] = []
         token: str | None = None
         for _ in range(MAX_PAGES):

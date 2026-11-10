@@ -21,6 +21,7 @@ from lifeos.domain.capacity import local_datetime
 from lifeos.domain.plan import PlanStatus
 from lifeos.domain.schedule import MINUTES_PER_DAY
 from lifeos.domain.weeks import IsoWeek
+from lifeos.ports.clock import Clock
 
 
 class CalendarNotApprovedError(ApplicationError):
@@ -33,6 +34,9 @@ class CalendarPreview:
     zone: ZoneInfo
     path: str  # nota del plan aprobado que se publica
     sync: SyncPlan
+    # Avisos para el propietario: bloques que ahora pisan un evento externo, o que no se pudo
+    # comprobar. No bloquean: el plan ya está aprobado; se corrige con `semana --replanificar`.
+    warnings: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -42,9 +46,23 @@ class CalendarResult:
 
 
 class CalendarPublisher:
-    def __init__(self, jefe: JefePlanner, calendar: CalendarTools) -> None:
+    def __init__(self, jefe: JefePlanner, calendar: CalendarTools, clock: Clock) -> None:
         self._jefe = jefe
         self._calendar = calendar
+        self._clock = clock
+
+    def _warnings(self, week: IsoWeek) -> tuple[str, ...]:
+        if not self._calendar.can_read:
+            return ()
+        try:
+            view = self._jefe.eventos_externos(week)
+        except ApplicationError as error:
+            return (f"no se comprobaron los eventos externos: {error}",)
+        return tuple(
+            f"'{block.title}' ({block.interval.start.astimezone(view.zone):%Y-%m-%d %H:%M}) pisa "
+            f"un intervalo ocupado de {hit.source}: replanifica con 'lifeos semana --replanificar'"
+            for block, hit in view.clashes
+        )
 
     def _prepare(self, week: IsoWeek | None) -> tuple[ActorContext, CalendarPreview]:
         view = self._jefe.semana(week)
@@ -59,8 +77,11 @@ class CalendarPublisher:
         start, end = _week_range(view.week, view.zone)
         label = view.week.render()
         published = self._calendar.published(actor, label, start, end)
-        sync = plan_sync(desired_entries(view.week, view.blocks), published)
-        return actor, CalendarPreview(view.week, view.zone, view.path, sync)
+        sync = plan_sync(
+            desired_entries(view.week, view.blocks), published, not_before=self._clock.now()
+        )
+        preview = CalendarPreview(view.week, view.zone, view.path, sync, self._warnings(view.week))
+        return actor, preview
 
     def preview(self, week: IsoWeek | None = None) -> CalendarPreview:
         """Lo que haría `publish`, sin escribir nada."""

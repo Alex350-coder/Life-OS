@@ -10,6 +10,7 @@ llevan la marca de Life OS, en el calendario propio de Life OS.
 import hashlib
 from collections.abc import Iterable
 from dataclasses import dataclass
+from datetime import datetime
 
 from lifeos.domain.capacity import Interval
 from lifeos.domain.plan import Block, BlockKind, clean
@@ -78,13 +79,27 @@ def _same_time(a: Interval, b: Interval) -> bool:
     return a.start.timestamp() == b.start.timestamp() and a.end.timestamp() == b.end.timestamp()
 
 
-def plan_sync(desired: Iterable[CalendarEntry], published: Iterable[PublishedEntry]) -> SyncPlan:
-    wanted = {entry.key: entry for entry in desired}
+def _past(interval: Interval, not_before: datetime | None) -> bool:
+    return not_before is not None and interval.end.timestamp() <= not_before.timestamp()
+
+
+def plan_sync(
+    desired: Iterable[CalendarEntry],
+    published: Iterable[PublishedEntry],
+    *,
+    not_before: datetime | None = None,
+) -> SyncPlan:
+    """Con `not_before`, lo ya terminado queda congelado: no se crea (no hace falta poner en el
+    calendario un bloque pasado) ni se borra o corrige (es historia)."""
+    wanted = {e.key: e for e in desired if not _past(e.interval, not_before)}
     seen: set[str] = set()
     update: list[tuple[str, CalendarEntry]] = []
     delete: list[PublishedEntry] = []
     unchanged = 0
     for event in published:
+        if _past(event.interval, not_before):
+            unchanged += 1
+            continue
         entry = wanted.get(event.key)
         if entry is None or event.key in seen:
             delete.append(event)  # fuera del plan o duplicado de una clave ya vista
