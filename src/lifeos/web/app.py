@@ -16,6 +16,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, RedirectResponse,
 
 from lifeos.bootstrap import Settings
 from lifeos.ports.clock import Clock
+from lifeos.web.agents_routes import router as agents_router
 from lifeos.web.errors import fail, install_error_handlers
 from lifeos.web.middleware import AUTH_PATH, AccessGuard
 from lifeos.web.routes import router
@@ -119,6 +120,7 @@ def create_app(
         return response
 
     app.include_router(router)
+    app.include_router(agents_router)
     _static(app, dist_dir)
     app.add_middleware(AccessGuard, port=port, sessions=sessions, monotonic=monotonic)
     return app
