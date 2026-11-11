@@ -38,7 +38,9 @@ ARCHIVE_ROOT = VaultPath("Archivo")
 INBOX_ROOT = VaultPath("00-Inbox")
 # Carpetas que no se leen como tareas: perfil del propietario, auditoría y capturas sin
 # procesar (el texto capturado es un dato y no debe ocupar ni duplicar ids de tareas).
-SKIPPED_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"), INBOX_ROOT)
+# Propuestas/ (Fase 8): notas de los especialistas; nunca se leen como tareas.
+PROPOSALS_ROOT = VaultPath("Propuestas")
+SKIPPED_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"), INBOX_ROOT, PROPOSALS_ROOT)
 # Mínimo de RULES E.12: ningún agente escribe aquí. La política puede ampliarlo, no reducirlo.
 RULES_FORBIDDEN_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"), ARCHIVE_ROOT)
 # Carpetas que los casos de uso de tareas nunca escriben si no se indica otra lista.

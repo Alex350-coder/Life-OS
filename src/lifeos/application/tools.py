@@ -13,7 +13,12 @@ from functools import partial
 
 from lifeos.application.capture import INBOX, capture
 from lifeos.application.checkin import append_to_section
-from lifeos.application.permissions import PUBLISH_TOOL, TOOL_WRITE_MODES, EffectivePermissions
+from lifeos.application.permissions import (
+    PROPOSE_TOOL,
+    PUBLISH_TOOL,
+    TOOL_WRITE_MODES,
+    EffectivePermissions,
+)
 from lifeos.application.plan_publication import (
     NoteWrite,
     PartialPublicationError,
@@ -24,14 +29,22 @@ from lifeos.application.plan_publication import (
 )
 from lifeos.application.policy_vault import PermissionDeniedError, PolicyVault
 from lifeos.application.tasks import LocatedTask, TaskQuery, query_tasks
+from lifeos.domain.area_proposals import AreaProposal, proposal_note_path, render_proposal
 from lifeos.domain.checkin import CHECKIN_HEADING, CHECKIN_SECTION, CheckInEntry
 from lifeos.domain.errors import LifeOSError
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import WriteMode
 from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult, LogWriteError
-from lifeos.ports.vault import PathRejectedError, Snapshot, VaultPath, VaultStore
+from lifeos.ports.vault import (
+    NoteExistsError,
+    PathRejectedError,
+    Snapshot,
+    VaultPath,
+    VaultStore,
+)
 
 _REJECTED_PATH = "(ruta rechazada)"
+MAX_PROPOSAL_REVISIONS = 50
 
 
 class AuditIncompleteError(LogWriteError):
@@ -202,6 +215,32 @@ class ToolRegistry:
                     raise
                 raise PartialPublicationError(tuple(written), error) from error
         return tuple(written)
+
+    def proponer_al_jefe(self, actor: ActorContext, proposal: AreaProposal) -> VaultPath:
+        """Crea la nota de propuestas de un especialista (RULES C.3): nunca edita una existente.
+
+        Una segunda ejecución en la misma semana crea una revisión `-n`. Un agente solo propone
+        en su nombre.
+        """
+        tool = PROPOSE_TOOL
+        first = proposal_note_path(proposal.week, proposal.agent_id, 1)
+        vault = self._scoped(actor, tool, first, TOOL_WRITE_MODES[tool])
+        if proposal.agent_id != actor.agent_id:
+            denied = PermissionDeniedError(actor.agent_id, "propuesta_ajena", first)
+            raise self._deny(actor, tool, first, denied)
+        text = render_proposal(proposal)
+        return self._write(actor, tool, first, partial(_create_revision, vault, proposal, text))
+
+
+def _create_revision(vault: VaultStore, proposal: AreaProposal, text: str) -> VaultPath:
+    for revision in range(1, MAX_PROPOSAL_REVISIONS + 1):
+        path = VaultPath(proposal_note_path(proposal.week, proposal.agent_id, revision))
+        try:
+            vault.write(path, text, expected=None)
+        except NoteExistsError:
+            continue
+        return path
+    raise LifeOSError(f"demasiadas propuestas de {proposal.agent_id} en {proposal.week}")
 
 
 def _write_note(vault: VaultStore, write: NoteWrite) -> VaultPath:
