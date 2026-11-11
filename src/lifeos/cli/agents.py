@@ -58,7 +58,10 @@ def _parser() -> argparse.ArgumentParser:
     commands.add_parser("lista", help="agentes y su estado")
     importar = commands.add_parser("importar", help="registrar un archivo en borrador")
     importar.add_argument("archivo")
-    for name in ("probar", "aprobar", "activar", "desactivar"):
+    probar = commands.add_parser("probar", help="prueba controlada sin escrituras")
+    probar.add_argument("id")
+    probar.add_argument("--ia", action="store_true", help="probar con el modelo, como se ejecutará")
+    for name in ("aprobar", "activar", "desactivar"):
         commands.add_parser(name, help=f"{name} un agente importado").add_argument("id")
     restaurar = commands.add_parser("restaurar", help="volver a una versión anterior")
     restaurar.add_argument("id")

@@ -334,8 +334,9 @@ def _specialists(
             return None
         return AiAreaDrafter(gateway, SCHEMAS[SPECIALIST_SCHEMA], profile=config.profile)
 
-    zone = ZoneInfo(settings.timezone) if settings.timezone else ZoneInfo("UTC")
-    return SpecialistRunner(registry, vault, audit, clock, zone=zone, drafter_for=drafter_for)
+    return SpecialistRunner(
+        registry, vault, audit, clock, configured_zone=settings.timezone, drafter_for=drafter_for
+    )
 
 
 def build_runtime(

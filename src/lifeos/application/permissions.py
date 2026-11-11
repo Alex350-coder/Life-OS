@@ -286,6 +286,11 @@ def _specialist_rules(agent: AgentConfig, policy: Policy, core_ids: frozenset[st
         folder = VaultPath(area_folder(agent.area))
         if not within_any(folder, agent.reads):
             problems.append(f"{agent.id}: debe leer la carpeta de su área '{folder}/'")
+        problems += [
+            f"{agent.id}: lectura '{root}/': un especialista solo lee la carpeta de su área"
+            for root in agent.reads
+            if not within_any(root, (folder,))
+        ]
     problems += [
         f"{agent.id}: un especialista no puede usar '{tool}' (solo propone al Jefe)"
         for tool in agent.tools

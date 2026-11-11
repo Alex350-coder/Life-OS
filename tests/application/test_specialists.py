@@ -86,7 +86,7 @@ def _runner(
         vault,
         audit,
         FakeClock(),
-        zone=UTC_ZONE,
+        configured_zone="UTC",
         drafter_for=(lambda config: drafter) if drafter is not None else None,  # type: ignore[arg-type,return-value]
     )
 

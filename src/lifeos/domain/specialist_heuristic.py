@@ -10,7 +10,7 @@ Solo propone: nada cambia hasta que el propietario acepte (RULES C.3).
 """
 
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 
 from lifeos.domain.area_proposals import MAX_ITEMS, ProposalItem, ProposalKind
@@ -97,3 +97,73 @@ def heuristic_items(
     drafts += [_goal_step(goal, today) for goal in goals.open_goals if goal.key not in linked]
     ordered = sorted(drafts, key=lambda draft: draft.sort_key)[:MAX_ITEMS]
     return tuple(_item(f"p{n}", draft) for n, draft in enumerate(ordered, start=1))
+
+
+# --- Filtro de lo que propone un modelo (revisión de la Fase 8) --------------------------------
+
+MAX_NEW_TASK_HORIZON_DAYS = 365
+DISCARD_OTHER_TASK = "tarea ajena o cerrada"
+DISCARD_NO_CHANGE = "sin cambio de prioridad"
+DISCARD_REPEATED = "repetida"
+DISCARD_EXISTING = "ya existe una tarea abierta igual"
+DISCARD_PAST = "fecha pasada"
+DISCARD_FAR = "fecha demasiado lejana"
+
+
+def _discard_reason(
+    item: ProposalItem, lines: Sequence[TaskLine], today: date, seen: set[object]
+) -> str | None:
+    if item.kind is ProposalKind.PRIORIDAD:
+        current = {line.task.id: line.task.priority for line in lines}
+        if item.task_id not in current:
+            return DISCARD_OTHER_TASK
+        if current[item.task_id] is item.priority:
+            return DISCARD_NO_CHANGE
+        key: object = item.task_id
+    else:
+        title = (item.title or "").casefold()
+        if any(line.task.title.casefold() == title for line in lines):
+            return DISCARD_EXISTING
+        if item.due is not None and item.due < today:
+            return DISCARD_PAST
+        if item.due is not None and (item.due - today).days > MAX_NEW_TASK_HORIZON_DAYS:
+            return DISCARD_FAR
+        key = title
+    if key in seen:
+        return DISCARD_REPEATED
+    seen.add(key)
+    return None
+
+
+def filter_drafted(
+    items: Sequence[ProposalItem], lines: Sequence[TaskLine], today: date
+) -> tuple[tuple[ProposalItem, ...], dict[str, int]]:
+    """Lo que el código exige aunque el prompt lo pida: tareas abiertas del área, cambios reales,
+    sin repetidos, sin duplicar tareas existentes y fechas razonables. Devuelve lo que queda y
+    cuántos se descartaron por cada motivo."""
+    kept: list[ProposalItem] = []
+    discarded: dict[str, int] = {}
+    seen: set[object] = set()
+    for item in items:
+        reason = _discard_reason(item, lines, today, seen)
+        if reason is None:
+            kept.append(item)
+        else:
+            discarded[reason] = discarded.get(reason, 0) + 1
+    return tuple(kept), discarded
+
+
+def with_urgent_floor(
+    drafted: Sequence[ProposalItem], heuristic: Sequence[ProposalItem]
+) -> tuple[ProposalItem, ...]:
+    """Lo urgente de la heurística (subir a alta) siempre entra, aunque la IA lo omita."""
+    covered = {item.task_id for item in drafted if item.kind is ProposalKind.PRIORIDAD}
+    floor = [
+        item
+        for item in heuristic
+        if item.kind is ProposalKind.PRIORIDAD
+        and item.priority is Priority.ALTA
+        and item.task_id not in covered
+    ]
+    merged = [*floor, *drafted][:MAX_ITEMS]
+    return tuple(replace(item, key=f"p{n}") for n, item in enumerate(merged, start=1))

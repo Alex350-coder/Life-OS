@@ -211,9 +211,10 @@ class AgentRegistry:
             raise
         self._log(correlation, action, target, AuditResult.OK, reason)
 
-    def record_test(self, agent_id: str) -> RegistryEntry:
-        """Marca la versión actual como probada tras una prueba controlada correcta."""
-        return self._apply(agent_id, LifecycleAction.PROBAR, None)
+    def record_test(self, agent_id: str, *, sha256: str | None = None) -> RegistryEntry:
+        """Marca la versión actual como probada tras una prueba controlada correcta. Con
+        `sha256`, solo si la versión actual es la que se probó (no otra importada mientras)."""
+        return self._apply(agent_id, LifecycleAction.PROBAR, None, tested_sha256=sha256)
 
     def transition(
         self, agent_id: str, action: LifecycleAction, *, version: int | None = None
@@ -223,12 +224,21 @@ class AgentRegistry:
             raise LifecycleError(f"{agent_id}: se marca como probado al ejecutar una prueba")
         return self._apply(agent_id, action, version)
 
-    def _apply(self, agent_id: str, action: LifecycleAction, version: int | None) -> RegistryEntry:
+    def _apply(
+        self,
+        agent_id: str,
+        action: LifecycleAction,
+        version: int | None,
+        *,
+        tested_sha256: str | None = None,
+    ) -> RegistryEntry:
         correlation = uuid.uuid4().hex
         name = f"agente_{action}"
         target = f"{_TARGET_PREFIX}{agent_id}"
         entry = self._entry(agent_id)
         try:
+            if tested_sha256 is not None and entry.current_version.sha256 != tested_sha256:
+                raise LifecycleError(f"{agent_id}: la versión cambió durante la prueba; repítela")
             updated = apply_action(entry, action, self._clock.now(), version=version)
             if action in (LifecycleAction.APROBAR, LifecycleAction.ACTIVAR):
                 self._validate(self._config(updated))
