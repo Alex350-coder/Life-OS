@@ -67,11 +67,13 @@ def test_valid_config_yields_effective_permissions_equal_to_request() -> None:
         WriteGrant(VaultPath("00-Inbox"), WriteMode.CREAR),
         WriteGrant(VaultPath("Diario"), WriteMode.ANEXAR_SECCION, "check-ins"),
     )
-    # Todas las herramientas salvo la de publicar el plan, exclusiva del dueño (SEC-09).
+    # Todas las herramientas salvo la de publicar el plan, exclusiva del dueño (SEC-09), las del
+    # calendario y la de los especialistas (Fase 8).
     assert coach.tools == frozenset(TOOL_WRITE_MODES) - {
         "publicar_plan",
         "leer_calendario",
         "publicar_calendario",
+        "proponer_al_jefe",
     }
     assert coach.profile == "ligero"
     assert effective["jefe"].writes == (WriteGrant(VaultPath("00-Inbox"), WriteMode.CREAR),)

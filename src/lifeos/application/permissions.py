@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from types import MappingProxyType
 
 from lifeos.application.tasks import DEFAULT_PROTECTED_ROOTS, RULES_FORBIDDEN_ROOTS
+from lifeos.domain.areas import PROPOSALS_ROOT as PROPOSALS_FOLDER
+from lifeos.domain.areas import SPECIALIST_AREAS, area_folder
 from lifeos.ports.config import (
     AgentCeiling,
     AgentConfig,
@@ -33,8 +35,11 @@ TOOL_WRITE_MODES: Mapping[str, WriteMode | None] = MappingProxyType(
         # Calendario externo (ADR-0017): no escriben en la bóveda. Publicar es solo del dueño.
         "leer_calendario": None,
         "publicar_calendario": None,
+        # Especialistas (Fase 8): crean una nota nueva en Propuestas/; nunca editan el plan.
+        "proponer_al_jefe": WriteMode.CREAR,
     }
 )
+PROPOSE_TOOL = "proponer_al_jefe"
 PUBLISH_TOOL = "publicar_plan"
 CALENDAR_READ_TOOL = "leer_calendario"
 CALENDAR_WRITE_TOOL = "publicar_calendario"
@@ -257,3 +262,63 @@ def protected_roots(policy: Policy) -> tuple[VaultPath, ...]:
         if not within_any(root, roots):
             roots.append(root)
     return tuple(roots)
+
+
+# --- Especialistas importados (Fase 8, RULES C.3 y E.10) --------------------------------------
+
+# Un especialista lee su área y propone; no captura, no anexa check-ins ni publica nada.
+SPECIALIST_TOOLS = frozenset({"leer_nota", "listar_tareas", PROPOSE_TOOL})
+PROPOSALS_ROOT = VaultPath(PROPOSALS_FOLDER)
+
+
+def _specialist_rules(agent: AgentConfig, policy: Policy, core_ids: frozenset[str]) -> list[str]:
+    problems = []
+    if agent.id in core_ids:
+        problems.append(f"{agent.id}: es un agente del núcleo; no se importa")
+    if agent.id == policy.plan_owner:
+        problems.append(f"{agent.id}: el dueño del plan global no puede ser un especialista")
+    if agent.area is None or agent.area not in SPECIALIST_AREAS:
+        problems.append(
+            f"{agent.id}: declara un área con especialista "
+            f"({', '.join(sorted(a.value for a in SPECIALIST_AREAS))}); Salud y Finanzas no"
+        )
+    else:
+        folder = VaultPath(area_folder(agent.area))
+        if not within_any(folder, agent.reads):
+            problems.append(f"{agent.id}: debe leer la carpeta de su área '{folder}/'")
+    problems += [
+        f"{agent.id}: un especialista no puede usar '{tool}' (solo propone al Jefe)"
+        for tool in agent.tools
+        if tool not in SPECIALIST_TOOLS
+    ]
+    problems += [
+        f"{agent.id}: escritura '{grant.root}': un especialista solo escribe en '{PROPOSALS_ROOT}/'"
+        for grant in agent.writes
+        if grant.mode is not WriteMode.CREAR or not within_any(grant.root, (PROPOSALS_ROOT,))
+    ]
+    return problems
+
+
+def validate_specialist(
+    agent: AgentConfig,
+    policy: Policy,
+    catalog: ModelCatalog,
+    *,
+    tools: Mapping[str, WriteMode | None],
+    contracts: frozenset[str],
+    core_ids: frozenset[str],
+) -> EffectivePermissions:
+    """Valida un agente importado: las reglas comunes (solicitado ∩ política) más las propias
+    de un especialista. Con cualquier problema se rechaza entero, con todos los motivos."""
+    problems = validate_policy(policy) + _specialist_rules(agent, policy, core_ids)
+    problems += _check_agent(agent, policy, catalog, tools, contracts)
+    if problems:
+        raise ConfigRejectedError(agent.id, tuple(problems))
+    return EffectivePermissions(
+        agent_id=agent.id,
+        profile=agent.profile,
+        reads=agent.reads,
+        writes=agent.writes,
+        tools=frozenset(agent.tools),
+        forbidden_write=policy.forbidden_write,
+    )

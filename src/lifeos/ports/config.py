@@ -13,6 +13,7 @@ from enum import StrEnum
 from typing import Protocol
 
 from lifeos.domain.errors import LifeOSError
+from lifeos.domain.task import Area
 from lifeos.ports.vault import VaultPath
 
 
@@ -94,6 +95,7 @@ class AgentConfig:
     writes: tuple[WriteGrant, ...]
     metrics: tuple[str, ...]
     source_sha256: str  # huella del archivo importado (registro-de-agentes)
+    area: Area | None = None  # solo especialistas (Fase 8): el área que propone
 
 
 class ConfigError(LifeOSError):

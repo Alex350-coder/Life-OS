@@ -16,7 +16,9 @@ from lifeos.application.permissions import (
     resolve_effective,
 )
 
-KNOWN_CONTRACTS = frozenset({"captura_v1", "checkin_v1", "plan_v1", "coach_v1"})
+KNOWN_CONTRACTS = frozenset(
+    {"captura_v1", "checkin_v1", "plan_v1", "coach_v1", "propuesta_area_v1"}
+)
 
 
 def dump(data: object) -> str:
@@ -142,3 +144,36 @@ def effective() -> Mapping[str, EffectivePermissions]:
         tools=TOOL_WRITE_MODES,
         contracts=KNOWN_CONTRACTS,
     )
+
+
+SPECIALIST_CONTRACT = "propuesta_area_v1"
+
+
+def policy_with_specialist() -> dict[str, Any]:
+    """Política de prueba con el techo del especialista Universidad (Fase 8)."""
+    data = policy()
+    data["agentes"]["universidad"] = {
+        "herramientas": ["leer_nota", "listar_tareas", "proponer_al_jefe"],
+        "lectura": ["01-Universidad/"],
+        "escritura": [{"ruta": "Propuestas/", "modo": "crear"}],
+    }
+    return data
+
+
+def specialist(agent_id: str = "universidad", area: str = "universidad") -> dict[str, Any]:
+    return {
+        "schema_version": 1,
+        "id": agent_id,
+        "nombre": agent_id.capitalize(),
+        "version": 1,
+        "proposito": "Proponer prioridades del área al Jefe.",
+        "area": area,
+        "modelo_solicitado": {"perfil": "ligero"},
+        "contrato": {"entrada": SPECIALIST_CONTRACT, "salida": SPECIALIST_CONTRACT},
+        "herramientas": ["leer_nota", "listar_tareas", "proponer_al_jefe"],
+        "permisos_solicitados": {
+            "lectura": ["01-Universidad/"],
+            "escritura": [{"ruta": "Propuestas/", "modo": "crear"}],
+        },
+        "metricas": ["propuestas_generadas"],
+    }
