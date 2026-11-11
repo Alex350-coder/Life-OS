@@ -17,6 +17,7 @@ from types import MappingProxyType
 from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from lifeos.adapters.agent_store import JsonAgentRegistry
 from lifeos.adapters.encrypted_backup import EncryptedVaultBackup
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.adapters.google_access import GoogleCalendarAccess
@@ -37,7 +38,8 @@ from lifeos.adapters.secrets import MissingSecretError, Secret, read_dotenv, res
 from lifeos.adapters.system_clock import SystemClock
 from lifeos.adapters.telegram import DEFAULT_BASE_URL, TelegramBotClient, TelegramNotifier
 from lifeos.adapters.whisper import MODEL_SIZES, FasterWhisperTranscriber
-from lifeos.adapters.yaml_config import YamlConfigSource
+from lifeos.adapters.yaml_config import YamlConfigSource, parse_agent
+from lifeos.application.agent_registry import AgentRegistry
 from lifeos.application.calendar_publication import CalendarPublisher
 from lifeos.application.calendar_tools import CalendarTools
 from lifeos.application.closing import DailyClosing
@@ -51,8 +53,11 @@ from lifeos.application.permissions import (
     EffectivePermissions,
     protected_roots,
     resolve_effective,
+    validate_specialist,
 )
+from lifeos.application.proposal_review import ProposalReview
 from lifeos.application.rituals import RitualRunner
+from lifeos.application.specialists import AiAreaDrafter, AreaDrafter, SpecialistRunner
 from lifeos.application.tools import ToolRegistry
 from lifeos.ports.backup import VaultBackup
 from lifeos.ports.calendar import BusyReader, CalendarAccess, CalendarWriter
@@ -132,6 +137,10 @@ class Runtime:
     # Google Calendar (ADR-0017): sin autorizar, las herramientas no leen ni escriben.
     calendar: CalendarTools | None = None
     calendar_publisher: CalendarPublisher | None = None
+    # Registro de agentes y especialistas (Fase 8, ADR-0018).
+    registry: AgentRegistry | None = None
+    specialists: SpecialistRunner | None = None
+    proposals: ProposalReview | None = None
 
 
 def _provider_secrets(settings: Settings, catalog: ModelCatalog) -> dict[str, Secret]:
@@ -279,6 +288,56 @@ def _coach(
     return CoachSession(tools, clock, writer=writer, configured_zone=settings.timezone)
 
 
+AGENTS_STATE_SUBDIR = "agentes"
+SPECIALIST_SCHEMA = "propuesta_area_v1"
+
+
+def _agent_registry(
+    settings: Settings,
+    source: YamlConfigSource,
+    core: tuple[AgentConfig, ...],
+    audit: AuditLog,
+    clock: Clock,
+) -> AgentRegistry:
+    """La política y el catálogo se releen en cada validación: si el propietario reduce la
+    política, un especialista activo deja de ejecutarse sin reiniciar nada."""
+    core_ids = frozenset(agent.id for agent in core)
+
+    def validate(agent: AgentConfig) -> EffectivePermissions:
+        policy = source.load_policy()
+        return validate_specialist(
+            agent,
+            policy,
+            source.load_catalog(),
+            tools=TOOL_WRITE_MODES,
+            contracts=frozenset(SCHEMAS),
+            core_ids=core_ids | {policy.plan_owner},
+        )
+
+    store = JsonAgentRegistry(_state_dir(settings) / AGENTS_STATE_SUBDIR)
+    return AgentRegistry(store, parse_agent, validate, audit, clock)
+
+
+def _specialists(
+    settings: Settings,
+    registry: AgentRegistry,
+    vault: VaultStore | None,
+    gateway: ModelGateway | None,
+    audit: AuditLog,
+    clock: Clock,
+) -> SpecialistRunner | None:
+    if vault is None:
+        return None
+
+    def drafter_for(config: AgentConfig) -> AreaDrafter | None:
+        if gateway is None:
+            return None
+        return AiAreaDrafter(gateway, SCHEMAS[SPECIALIST_SCHEMA], profile=config.profile)
+
+    zone = ZoneInfo(settings.timezone) if settings.timezone else ZoneInfo("UTC")
+    return SpecialistRunner(registry, vault, audit, clock, zone=zone, drafter_for=drafter_for)
+
+
 def build_runtime(
     settings: Settings,
     *,
@@ -323,6 +382,7 @@ def build_runtime(
         if vault is not None and coach is not None
         else None
     )
+    registry = _agent_registry(settings, source, agents, audit_log, clock)
     return Runtime(
         policy=policy,
         catalog=catalog,
@@ -342,6 +402,13 @@ def build_runtime(
         audit_reader=JsonlAuditReader(settings.logs_dir),
         calendar=calendar,
         calendar_publisher=CalendarPublisher(jefe, calendar, clock) if jefe is not None else None,
+        registry=registry,
+        specialists=_specialists(settings, registry, vault, gateway, audit_log, clock),
+        proposals=(
+            ProposalReview(vault, audit_log, clock, protected=protected_roots(policy))
+            if vault is not None
+            else None
+        ),
     )
 
 

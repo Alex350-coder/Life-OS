@@ -1,0 +1,23 @@
+# Especialista Carrera (Fase 8, ADR-0004, ADR-0018). Plantilla para IMPORTAR, no se carga sola:
+#   uv run lifeos-agentes importar config/especialistas/carrera.yaml
+# Este archivo SOLICITA; la política del propietario decide. Queda en borrador hasta que lo
+# pruebes, lo apruebes y lo actives. Para una versión nueva, sube 'version'.
+schema_version: 1
+id: carrera
+nombre: Carrera
+version: 1
+proposito: "Revisar búsqueda de empleo, carrera y certificaciones y proponer al Jefe prioridades y siguientes pasos."
+area: carrera
+modelo_solicitado:
+  perfil: ligero
+contrato:
+  entrada: propuesta_area_v1
+  salida: propuesta_area_v1
+herramientas: [leer_nota, listar_tareas, proponer_al_jefe]
+permisos_solicitados:
+  lectura:
+    - 03-Carrera/
+  escritura:
+    - ruta: Propuestas/
+      modo: crear
+metricas: [propuestas_generadas, propuestas_aceptadas]
