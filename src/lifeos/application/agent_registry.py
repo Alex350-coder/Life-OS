@@ -19,6 +19,7 @@ from dataclasses import dataclass
 from lifeos.application.permissions import EffectivePermissions
 from lifeos.application.tasks import ApplicationError
 from lifeos.domain.agent_lifecycle import (
+    AgentState,
     LifecycleAction,
     LifecycleError,
     RegistryEntry,
@@ -239,3 +240,6 @@ class AgentRegistry:
         self._log(correlation, name, target, AuditResult.INTENTO)
         self._commit(correlation, name, target, updated)
         return updated
+
+    def state(self, agent_id: str) -> AgentState:
+        return self._entry(agent_id).state
