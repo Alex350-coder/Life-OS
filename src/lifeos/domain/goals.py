@@ -20,6 +20,8 @@ from lifeos.domain.task import Area
 MAX_GOALS = 50
 MAX_GOAL_TITLE = 160
 _GOAL_LINE_RE = re.compile(r"\s*[-*+] \[meta::")
+_TASK_LINE_RE = re.compile(r"\s*[-*+] \[.\] ")
+_GOAL_FIELD = "[meta::"
 _FIELD_RE = re.compile(r"\[([a-z_]+)::\s*([^\[\]]*?)\s*\]")
 _KEY_RE = re.compile(r"m[0-9]{1,4}")
 _ALLOWED_FIELDS = frozenset({"meta", "horizonte", "estado"})
@@ -76,6 +78,9 @@ def parse_goals(text: str, area: Area) -> GoalsReport:
     problems = 0
     for line in text.splitlines():
         if not _GOAL_LINE_RE.match(line):
+            # Una meta mal escrita (campo después del texto) se avisa; una tarea enlazada no.
+            if _GOAL_FIELD in line and not _TASK_LINE_RE.match(line):
+                problems += 1
             continue
         goal = _parse_line(line, area)
         if goal is None or goal.key in seen or len(goals) >= MAX_GOALS:

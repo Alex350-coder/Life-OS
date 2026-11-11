@@ -19,6 +19,7 @@ from lifeos.domain.agent_lifecycle import (
     AgentState,
     AgentVersion,
     LifecycleAction,
+    LifecycleError,
     RegistryEntry,
     Transition,
 )
@@ -161,7 +162,7 @@ class JsonAgentRegistry:
         raw = self._read_raw()
         try:
             return {key: _entry(key, value) for key, value in raw.items()}
-        except (KeyError, TypeError, ValueError) as error:
+        except (KeyError, TypeError, ValueError, LifecycleError) as error:
             raise StateError(
                 f"{REGISTRY_FILE} está dañado ({type(error).__name__}); revísalo"
             ) from None

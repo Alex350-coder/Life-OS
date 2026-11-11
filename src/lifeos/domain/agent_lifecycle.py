@@ -69,6 +69,17 @@ class RegistryEntry:
     versions: tuple[AgentVersion, ...]
     history: tuple[Transition, ...]
 
+    def __post_init__(self) -> None:
+        count = len(self.versions)
+        if [v.number for v in self.versions] != list(range(1, count + 1)):
+            raise LifecycleError(f"{self.agent_id}: versiones no consecutivas")
+        if not 1 <= self.current <= count:
+            raise LifecycleError(f"{self.agent_id}: la versión actual no existe")
+        if not self.history or self.history[-1].to_state is not self.state:
+            raise LifecycleError(f"{self.agent_id}: el historial no termina en el estado actual")
+        if any(not 1 <= t.version <= count for t in self.history):
+            raise LifecycleError(f"{self.agent_id}: el historial cita una versión inexistente")
+
     @property
     def current_version(self) -> AgentVersion:
         return self.versions[self.current - 1]

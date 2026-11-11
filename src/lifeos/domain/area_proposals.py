@@ -36,6 +36,12 @@ SOURCES = frozenset({"heuristica", "ia"})
 _REF_PARTS = 3
 
 
+def _inert(text: str, limit: int) -> str:
+    """Como `clean`, y además sin comillas invertidas: en Obsidian podrían ejecutar código en
+    línea (Dataview `$=`) al abrir la nota de propuestas."""
+    return clean(text.replace("`", "'"), limit)
+
+
 class ProposalKind(StrEnum):
     PRIORIDAD = "prioridad"  # cambiar la prioridad de una tarea existente del área
     NUEVA_TAREA = "nueva_tarea"  # crear una tarea en el área
@@ -62,12 +68,12 @@ class ProposalItem:
     def __post_init__(self) -> None:
         if not _KEY_RE.fullmatch(self.key):
             raise ValidationError("propuesta", self.key, "clave esperada p<n>")
-        reason = clean(self.reason, MAX_REASON_CHARS)
+        reason = _inert(self.reason, MAX_REASON_CHARS)
         if not reason:
             raise ValidationError("motivo", "", "no puede estar vacío")
         object.__setattr__(self, "reason", reason)
         if self.title is not None:
-            object.__setattr__(self, "title", clean(self.title, MAX_TITLE_CHARS) or None)
+            object.__setattr__(self, "title", _inert(self.title, MAX_TITLE_CHARS) or None)
         if self.kind is ProposalKind.PRIORIDAD:
             self._check_priority_change()
         else:
@@ -121,14 +127,18 @@ class ProposalRef:
     note: str
     key: str
 
+    def __post_init__(self) -> None:
+        if not _NOTE_RE.fullmatch(self.note) or not _KEY_RE.fullmatch(self.key):
+            raise ValidationError(
+                "propuesta", f"{self.note}/{self.key}", "formato esperado AAAA-Wnn/<nota>/p<n>"
+            )
+
     @classmethod
     def parse(cls, raw: str) -> "ProposalRef":
         parts = raw.strip().split("/")
         if len(parts) != _REF_PARTS:
             raise ValidationError("propuesta", raw, "formato esperado AAAA-Wnn/<nota>/p<n>")
         week, note, key = parts
-        if not _NOTE_RE.fullmatch(note) or not _KEY_RE.fullmatch(key):
-            raise ValidationError("propuesta", raw, "formato esperado AAAA-Wnn/<nota>/p<n>")
         return cls(IsoWeek.parse(week), note, key)
 
     @property
@@ -202,7 +212,10 @@ def _parse_item(line: str) -> ProposalItem | None:
 def _item_lines(text: str) -> list[tuple[int, ProposalItem]]:
     found: list[tuple[int, ProposalItem]] = []
     seen: set[str] = set()
-    for index, line in enumerate(text.splitlines()):
+    # Mismo separador que `with_status`: splitlines() también corta en \x0c, \x85 o \u2028 y
+    # desplazaría el índice de la línea que se reescribe.
+    for index, raw in enumerate(text.split("\n")):
+        line = raw.removesuffix("\r")
         if not _ITEM_LINE_RE.match(line):
             continue
         item = _parse_item(line)
@@ -227,7 +240,8 @@ def with_status(text: str, key: str, status: ProposalStatus) -> str:
         if item.status is not ProposalStatus.PENDIENTE:
             raise ValidationError("propuesta", key, f"ya está {item.status}")
         lines = text.split("\n")
-        lines[index] = _render_item(_with(item, status))
+        ending = "\r" if lines[index].endswith("\r") else ""
+        lines[index] = _render_item(_with(item, status)) + ending
         return "\n".join(lines)
     raise ValidationError("propuesta", key, "no existe en la nota")
 
