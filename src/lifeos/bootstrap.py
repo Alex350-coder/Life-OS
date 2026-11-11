@@ -8,7 +8,7 @@ de modelos.
 
 import hashlib
 import os
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from contextlib import AbstractContextManager
 from dataclasses import dataclass, field
 from datetime import UTC
@@ -32,7 +32,7 @@ from lifeos.adapters.jsonl_logs import (
     JsonlUsageReader,
 )
 from lifeos.adapters.nvidia_llm import NvidiaChatClient
-from lifeos.adapters.process_lock import ProcessLock
+from lifeos.adapters.process_lock import FileLock, ProcessLock
 from lifeos.adapters.schemas import SCHEMAS
 from lifeos.adapters.secrets import MissingSecretError, Secret, read_dotenv, resolve_secret
 from lifeos.adapters.system_clock import SystemClock
@@ -314,8 +314,16 @@ def _agent_registry(
             core_ids=core_ids | {policy.plan_owner},
         )
 
-    store = JsonAgentRegistry(_state_dir(settings) / AGENTS_STATE_SUBDIR)
-    return AgentRegistry(store, parse_agent, validate, audit, clock)
+    directory = _state_dir(settings) / AGENTS_STATE_SUBDIR
+    store = JsonAgentRegistry(directory)
+    return AgentRegistry(
+        store, parse_agent, validate, audit, clock, exclusive=_exclusive(directory / "registro")
+    )
+
+
+def _exclusive(base: Path) -> Callable[[], AbstractContextManager[object]]:
+    """Candado entre procesos: la CLI y la web escriben el mismo registro y las mismas notas."""
+    return lambda: FileLock(base.with_suffix(".lock"))
 
 
 def _specialists(
@@ -406,7 +414,13 @@ def build_runtime(
         registry=registry,
         specialists=_specialists(settings, registry, vault, gateway, audit_log, clock),
         proposals=(
-            ProposalReview(vault, audit_log, clock, protected=protected_roots(policy))
+            ProposalReview(
+                vault,
+                audit_log,
+                clock,
+                protected=protected_roots(policy),
+                exclusive=_exclusive(_state_dir(settings) / AGENTS_STATE_SUBDIR / "propuestas"),
+            )
             if vault is not None
             else None
         ),

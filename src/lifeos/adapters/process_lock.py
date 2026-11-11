@@ -5,6 +5,7 @@ Usa el bloqueo del sistema operativo sobre un archivo, que se libera solo si el 
 
 import os
 import sys
+import time
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -63,3 +64,34 @@ class ProcessLock:
         tb: TracebackType | None,
     ) -> None:
         self.release()
+
+
+class LockTimeoutError(LifeOSError):
+    """Otro proceso (la CLI o la web) tiene el registro ocupado más tiempo del razonable."""
+
+
+LOCK_POLL_S = 0.05
+
+
+class FileLock(ProcessLock):
+    """Exclusión entre procesos que espera su turno (registro de agentes y propuestas, Fase 8).
+
+    La CLI y la web son procesos distintos: el candado en memoria de la web no las coordina.
+    """
+
+    def __init__(self, path: Path, *, timeout_s: float = 10.0) -> None:
+        super().__init__(path)
+        self._timeout_s = timeout_s
+
+    def acquire(self) -> None:
+        deadline = time.monotonic() + self._timeout_s
+        while True:
+            try:
+                super().acquire()
+                return
+            except AlreadyRunningError:
+                if time.monotonic() >= deadline:
+                    raise LockTimeoutError(
+                        f"el registro está ocupado por otro proceso ({self._path.name}); repite"
+                    ) from None
+                time.sleep(LOCK_POLL_S)

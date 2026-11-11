@@ -7,7 +7,7 @@ from typing import Annotated
 from fastapi import APIRouter, Path, Query, Request
 from fastapi.responses import JSONResponse
 
-from lifeos.application.agent_registry import AgentRegistry, RegistryView
+from lifeos.application.agent_registry import AgentRegistry
 from lifeos.application.proposal_review import ProposalReview
 from lifeos.application.specialists import SpecialistRunner
 from lifeos.bootstrap import Runtime
@@ -47,10 +47,6 @@ def _review(runtime: Runtime) -> ProposalReview:
     return runtime.proposals
 
 
-def _find(registry: AgentRegistry, agent_id: str) -> RegistryView:
-    return next(v for v in registry.views() if v.entry.agent_id == agent_id)
-
-
 def imported(runtime: Runtime) -> list[serialize.Json]:
     """Agentes importados para la vista de Agentes (`GET /api/agentes`)."""
     if runtime.registry is None:
@@ -72,7 +68,7 @@ def importar(request: Request, body: AgentImportIn) -> JSONResponse:
             422,
             data={"violations": [serialize.text(v) for v in error.violations]},
         )
-    return ok(serialize.registry_view(_find(registry, entry.agent_id)), 201)
+    return ok(serialize.registry_view(registry.view(entry.agent_id)), 201)
 
 
 @router.post("/agentes/{agent_id}/prueba")
@@ -89,7 +85,7 @@ def cambiar_estado(request: Request, agent_id: AgentId, body: AgentActionIn) -> 
     registry = _registry(web.base)
     with web.writing():
         registry.transition(agent_id, LifecycleAction(body.accion), version=body.version)
-    return ok(serialize.registry_view(_find(registry, agent_id)))
+    return ok(serialize.registry_view(registry.view(agent_id)))
 
 
 @router.get("/agentes/{agent_id}/exportacion")
@@ -100,7 +96,7 @@ def exportar(
 ) -> JSONResponse:
     registry = _registry(_web(request).base)
     data = registry.export(agent_id, version=version)
-    current = _find(registry, agent_id).entry.current
+    current = registry.view(agent_id).entry.current
     return ok({"version": version or current, "contenido": data.decode("utf-8")})
 
 
@@ -118,8 +114,13 @@ def propuestas(
     request: Request, semana: Annotated[str | None, Query(max_length=10)] = None
 ) -> JSONResponse:
     week = IsoWeek.parse(semana) if semana else None
-    items = _review(_web(request).base).pending(week)
-    return ok({"items": [serialize.review_item(i) for i in items]})
+    pending = _review(_web(request).base).pending(week)
+    return ok(
+        {
+            "items": [serialize.review_item(i) for i in pending.items],
+            "skipped": [serialize.text(s) for s in pending.skipped],
+        }
+    )
 
 
 @router.post("/propuestas/aceptacion")

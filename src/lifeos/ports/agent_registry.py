@@ -16,8 +16,11 @@ class AgentRegistryStore(Protocol):
 
     def save(self, entry: RegistryEntry) -> None: ...
 
-    def put_version(self, agent_id: str, number: int, data: bytes) -> None:
-        """Guarda la copia de una versión; si ya existe con otro contenido, `StateError`."""
+    def put_version(
+        self, agent_id: str, number: int, data: bytes, *, replace: bool = False
+    ) -> None:
+        """Guarda la copia de una versión. Si ya existe con otro contenido: `StateError`, salvo
+        con `replace` (solo para una versión que el registro aún no tiene)."""
         ...
 
     def get_version(self, agent_id: str, number: int) -> bytes: ...

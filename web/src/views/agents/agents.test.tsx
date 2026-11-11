@@ -289,3 +289,12 @@ describe("Ciclo de vida en la tarjeta", () => {
     expect(calls.some((c) => c.url.endsWith("/estado"))).toBe(false);
   });
 });
+
+it("las notas omitidas se avisan en el panel", async () => {
+  installFakeApi({
+    "GET /api/agentes": ok(agents()),
+    "GET /api/propuestas": ok({ items: [], skipped: ["Propuestas/2026-W45/Mis notas.md: no válida"] }),
+  });
+  render(<AgentsView />);
+  expect(await screen.findByText(/Nota omitida: Propuestas\/2026-W45\/Mis notas.md/)).toBeInTheDocument();
+});

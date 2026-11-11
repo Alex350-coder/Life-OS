@@ -179,10 +179,16 @@ class JsonAgentRegistry:
             raise StateError("id de agente o número de versión no válidos")
         return self._dir / agent_id / f"v{number}.yaml"
 
-    def put_version(self, agent_id: str, number: int, data: bytes) -> None:
+    def put_version(
+        self, agent_id: str, number: int, data: bytes, *, replace: bool = False
+    ) -> None:
         path = self._version_path(agent_id, number)
-        if path.exists():
-            if path.read_bytes() == data:
+        if path.exists() and not replace:
+            try:
+                same = path.read_bytes() == data
+            except OSError as error:
+                raise StateError(f"no se pudo leer la v{number} de {agent_id}") from error
+            if same:
                 return
             raise StateError(f"la v{number} de {agent_id} ya existe con otro contenido")
         _write_atomic(path, data)

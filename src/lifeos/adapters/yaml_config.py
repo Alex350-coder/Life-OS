@@ -107,6 +107,8 @@ def strict_load(text: str, source: str = "config") -> object:
             return loader.get_single_data()
         finally:
             loader.dispose()
+    except RecursionError:
+        raise ConfigSyntaxError(source, ("YAML no válido: anidamiento excesivo",)) from None
     except yaml.YAMLError as error:
         # Solo el problema y la línea: el contexto de PyYAML reproduce fragmentos del archivo.
         problem = getattr(error, "problem", None) or type(error).__name__

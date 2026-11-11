@@ -14,6 +14,7 @@ aprobar → activar; desactivar y restaurar en cualquier momento. Reglas:
 import hashlib
 import uuid
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 
 from lifeos.application.permissions import EffectivePermissions
@@ -42,6 +43,8 @@ HASH_PREFIX_CHARS = 12
 
 ParseAgent = Callable[[bytes, str], AgentConfig]
 ValidateAgent = Callable[[AgentConfig], EffectivePermissions]
+# Exclusión entre procesos (la CLI y la web escriben el mismo registro).
+Exclusive = Callable[[], AbstractContextManager[object]]
 
 
 class AgentNotFoundError(ApplicationError):
@@ -70,7 +73,10 @@ class AgentRegistry:
         validate: ValidateAgent,
         audit: AuditLog,
         clock: Clock,
+        *,
+        exclusive: Exclusive = nullcontext,
     ) -> None:
+        self._exclusive = exclusive
         self._store = store
         self._parse = parse
         self._validate = validate
@@ -131,6 +137,9 @@ class AgentRegistry:
         except ConfigError as error:
             return RegistryView(entry, config, None, error.violations)
 
+    def view(self, agent_id: str) -> RegistryView:
+        return self._view(self._entry(agent_id))
+
     def views(self) -> tuple[RegistryView, ...]:
         return tuple(self._view(entry) for _, entry in sorted(self._store.load().items()))
 
@@ -175,6 +184,12 @@ class AgentRegistry:
             )
             raise
         target = f"{_TARGET_PREFIX}{config.id}"
+        with self._exclusive():
+            return self._register(correlation, target, config, data)
+
+    def _register(
+        self, correlation: str, target: str, config: AgentConfig, data: bytes
+    ) -> RegistryEntry:
         try:
             entry = register_import(
                 self._store.load().get(config.id),
@@ -204,7 +219,9 @@ class AgentRegistry:
         reason = reason or f"v{entry.current} {entry.state}"
         try:
             if data is not None:
-                self._store.put_version(entry.agent_id, entry.current, data)
+                # La versión es nueva para el registro: una copia huérfana de un guardado que
+                # falló antes se reemplaza (si no, bloquearía toda importación posterior).
+                self._store.put_version(entry.agent_id, entry.current, data, replace=True)
             self._store.save(entry)
         except LifeOSError as error:
             self._log(correlation, action, target, AuditResult.ERROR, type(error).__name__)
@@ -231,6 +248,16 @@ class AgentRegistry:
         version: int | None,
         *,
         tested_sha256: str | None = None,
+    ) -> RegistryEntry:
+        with self._exclusive():
+            return self._apply_locked(agent_id, action, version, tested_sha256)
+
+    def _apply_locked(
+        self,
+        agent_id: str,
+        action: LifecycleAction,
+        version: int | None,
+        tested_sha256: str | None,
     ) -> RegistryEntry:
         correlation = uuid.uuid4().hex
         name = f"agente_{action}"

@@ -73,7 +73,7 @@ def _statuses(vault: FilesystemVault) -> dict[str, ProposalStatus]:
 
 
 def test_lists_pending_items_with_task_context(seeded: FilesystemVault) -> None:
-    items = _review(seeded).pending(WEEK)
+    items = _review(seeded).pending(WEEK).items
 
     assert [str(i.ref) for i in items] == ["2026-W44/universidad/p1", "2026-W44/universidad/p2"]
     first = items[0]
@@ -110,7 +110,7 @@ def test_reject_changes_nothing_but_the_mark(seeded: FilesystemVault) -> None:
 
     assert find_task(seeded, TaskId("t-abc234")).task.priority is Priority.MEDIA
     assert _statuses(seeded)["p1"] is ProposalStatus.RECHAZADA
-    assert [str(i.ref) for i in _review(seeded).pending(WEEK)] == ["2026-W44/universidad/p2"]
+    assert [str(i.ref) for i in _review(seeded).pending(WEEK).items] == ["2026-W44/universidad/p2"]
 
 
 def test_accepting_twice_is_rejected(seeded: FilesystemVault) -> None:
@@ -172,7 +172,7 @@ def test_note_without_valid_area_header_is_refused(
 
 
 def test_pending_without_proposals_folder_is_empty(vault: FilesystemVault) -> None:
-    assert _review(vault).pending(WEEK) == ()
+    assert _review(vault).pending(WEEK).items == ()
 
 
 def test_pending_lists_all_weeks_when_no_week_given(
@@ -181,7 +181,7 @@ def test_pending_lists_all_weeks_when_no_week_given(
     other = render_proposal(_proposal()).replace("2026-W44", "2026-W45")
     write_note("Propuestas/2026-W45/universidad.md", other)
 
-    refs = [str(i.ref) for i in _review(seeded).pending()]
+    refs = [str(i.ref) for i in _review(seeded).pending().items]
 
     assert "2026-W45/universidad/p1" in refs
     assert "2026-W44/universidad/p1" in refs

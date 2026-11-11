@@ -9,6 +9,8 @@ Si el cambio se aplica pero la marca no se puede guardar, el error lo dice para 
 """
 
 import uuid
+from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 
 from lifeos.application.tasks import (
@@ -62,6 +64,12 @@ class ReviewItem:
 
 
 @dataclass(frozen=True, slots=True)
+class PendingReview:
+    items: tuple[ReviewItem, ...]
+    skipped: tuple[str, ...]  # notas que no se pudieron leer o con nombre no válido, con motivo
+
+
+@dataclass(frozen=True, slots=True)
 class AcceptResult:
     ref: ProposalRef
     task_id: TaskId | None  # tarea creada o cambiada
@@ -75,7 +83,10 @@ class ProposalReview:
         clock: Clock,
         *,
         protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS,
+        exclusive: Callable[[], AbstractContextManager[object]] = nullcontext,
     ) -> None:
+        # Exclusión entre procesos: la CLI y la web no pueden aceptar a la vez (tarea duplicada).
+        self._exclusive = exclusive
         self._vault = vault
         self._audit = audit
         self._clock = clock
@@ -91,36 +102,44 @@ class ProposalReview:
             return ()
         return tuple(sorted((n for n in notes if n.name.endswith(".md")), key=lambda n: n.value))
 
-    def _review_item(self, path: VaultPath, area: Area | None, item: ProposalItem) -> ReviewItem:
-        parts = path.parts
-        ref = ProposalRef(IsoWeek.parse(parts[-2]), parts[-1].removesuffix(".md"), item.key)
+    def _review_item(self, ref: ProposalRef, area: Area | None, item: ProposalItem) -> ReviewItem:
         title = priority = None
         if item.task_id is not None:
             try:
                 task = find_task(self._vault, item.task_id).task
                 title, priority = task.title, task.priority
-            except LifeOSError:
-                pass  # la tarea pudo desaparecer: aceptar lo dirá con un error claro
+            except TaskNotFoundError:
+                pass  # la tarea desapareció: se muestra sin título y aceptar lo dirá
         return ReviewItem(ref, area, item, title, priority)
 
-    def pending(self, week: IsoWeek | None = None) -> tuple[ReviewItem, ...]:
-        """Elementos pendientes de una semana (o de todas), con el contexto de su tarea."""
-        found = []
+    def _read_note(self, path: VaultPath) -> tuple[str, str]:
+        """(semana/nota, texto). Lanza `ProposalReviewError` con el motivo si no sirve."""
+        if len(path.parts) != _NOTE_DEPTH:  # Propuestas/<semana>/<nota>.md
+            raise ProposalReviewError(f"{path}: fuera de Propuestas/<semana>/")
+        try:
+            ProposalRef(IsoWeek.parse(path.parts[1]), path.parts[2].removesuffix(".md"), "p1")
+            return path.parts[1], self._vault.read(path).text
+        except LifeOSError as error:
+            raise ProposalReviewError(f"{path}: {error}") from None
+
+    def pending(self, week: IsoWeek | None = None) -> PendingReview:
+        """Elementos pendientes de una semana (o de todas), con el contexto de su tarea. Las
+        notas que no se pueden leer se informan en `skipped`, nunca se ocultan."""
+        found: list[ReviewItem] = []
+        skipped: list[str] = []
         for path in self._notes(week):
-            if len(path.parts) != _NOTE_DEPTH:  # Propuestas/<semana>/<nota>.md
-                continue
             try:
-                IsoWeek.parse(path.parts[1])
-                text = self._vault.read(path).text
-            except (LifeOSError, ValueError):
+                week_text, text = self._read_note(path)
+            except ProposalReviewError as error:
+                skipped.append(str(error))
                 continue
-            area = proposal_area(text)
+            area, note = proposal_area(text), path.parts[2].removesuffix(".md")
             found += [
-                self._review_item(path, area, item)
+                self._review_item(ProposalRef(IsoWeek.parse(week_text), note, item.key), area, item)
                 for item in parse_proposal_note(text)
                 if item.status is ProposalStatus.PENDIENTE
             ]
-        return tuple(found)
+        return PendingReview(tuple(found), tuple(skipped))
 
     # --- Escritura ------------------------------------------------------------------------------
 
@@ -158,6 +177,10 @@ class ProposalReview:
             return self._change_priority(item, area)
         if item.title is None or item.effort is None:  # el dominio ya lo impide
             raise ProposalReviewError("la tarea nueva está incompleta")
+        if item.due is not None and item.due < self._clock.now().date():
+            raise ProposalReviewError(
+                f"la fecha límite propuesta ({item.due.isoformat()}) ya pasó; recházala"
+            )
         path = VaultPath(area_folder(area)).join(VaultPath(NEW_TASKS_NOTE))
         created = create_task(
             self._vault,
@@ -194,6 +217,10 @@ class ProposalReview:
         )
 
     def accept(self, ref: ProposalRef) -> AcceptResult:
+        with self._exclusive():
+            return self._accept(ref)
+
+    def _accept(self, ref: ProposalRef) -> AcceptResult:
         correlation = uuid.uuid4().hex
         action = "propuesta_aceptar"
         text, version, item, area = self._load(ref)
@@ -214,6 +241,10 @@ class ProposalReview:
         return AcceptResult(ref, task_id)
 
     def reject(self, ref: ProposalRef) -> None:
+        with self._exclusive():
+            self._reject(ref)
+
+    def _reject(self, ref: ProposalRef) -> None:
         correlation = uuid.uuid4().hex
         action = "propuesta_rechazar"
         text, version, _, _ = self._load(ref)

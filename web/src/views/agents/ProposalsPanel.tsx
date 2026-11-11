@@ -38,7 +38,7 @@ function Pending({ review }: { review: ReviewItem }) {
 // Solo el propietario acepta o rechaza (RULES C.3, C.5): aceptar aplica el cambio en la bóveda.
 // `version` sube cuando un especialista escribe propuestas nuevas: se recarga sin vaciar la lista.
 export function ProposalsPanel({ version }: { version: number }) {
-  const pending = useApi(() => get<{ items: ReviewItem[] }>("/api/propuestas"), "propuestas");
+  const pending = useApi(() => get<{ items: ReviewItem[]; skipped?: string[] }>("/api/propuestas"), "propuestas");
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
@@ -67,6 +67,7 @@ export function ProposalsPanel({ version }: { version: number }) {
   }
 
   const items = pending.data?.items ?? [];
+  const skipped = pending.data?.skipped ?? [];
   return (
     <section className="card" aria-labelledby="proposals-heading">
       <h2 id="proposals-heading">Propuestas de los especialistas</h2>
@@ -80,6 +81,11 @@ export function ProposalsPanel({ version }: { version: number }) {
           {error}
         </p>
       )}
+      {skipped.map((problem, index) => (
+        <p key={`${index}-${problem}`} className="banner banner-warn">
+          Nota omitida: {problem}
+        </p>
+      ))}
       <Loading loading={pending.loading && pending.data === null}>
         {items.length === 0 ? (
           <p className="muted">No hay propuestas pendientes.</p>

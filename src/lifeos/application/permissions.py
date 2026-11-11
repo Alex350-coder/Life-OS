@@ -10,8 +10,11 @@ from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from types import MappingProxyType
 
-from lifeos.application.tasks import DEFAULT_PROTECTED_ROOTS, RULES_FORBIDDEN_ROOTS
-from lifeos.domain.areas import PROPOSALS_ROOT as PROPOSALS_FOLDER
+from lifeos.application.tasks import (
+    DEFAULT_PROTECTED_ROOTS,
+    PROPOSALS_ROOT,
+    RULES_FORBIDDEN_ROOTS,
+)
 from lifeos.domain.areas import SPECIALIST_AREAS, area_folder
 from lifeos.ports.config import (
     AgentCeiling,
@@ -268,7 +271,6 @@ def protected_roots(policy: Policy) -> tuple[VaultPath, ...]:
 
 # Un especialista lee su área y propone; no captura, no anexa check-ins ni publica nada.
 SPECIALIST_TOOLS = frozenset({"leer_nota", "listar_tareas", PROPOSE_TOOL})
-PROPOSALS_ROOT = VaultPath(PROPOSALS_FOLDER)
 
 
 def _specialist_rules(agent: AgentConfig, policy: Policy, core_ids: frozenset[str]) -> list[str]:

@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from lifeos.domain.areas import PROPOSALS_ROOT as PROPOSALS_FOLDER
 from lifeos.domain.errors import LifeOSError, ValidationError
 from lifeos.domain.ids import TaskId, new_unique_task_id
 from lifeos.domain.integrity import DuplicateTaskIdError, Location, find_duplicate_ids
@@ -39,7 +40,7 @@ INBOX_ROOT = VaultPath("00-Inbox")
 # Carpetas que no se leen como tareas: perfil del propietario, auditoría y capturas sin
 # procesar (el texto capturado es un dato y no debe ocupar ni duplicar ids de tareas).
 # Propuestas/ (Fase 8): notas de los especialistas; nunca se leen como tareas.
-PROPOSALS_ROOT = VaultPath("Propuestas")
+PROPOSALS_ROOT = VaultPath(PROPOSALS_FOLDER)
 SKIPPED_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"), INBOX_ROOT, PROPOSALS_ROOT)
 # Mínimo de RULES E.12: ningún agente escribe aquí. La política puede ampliarlo, no reducirlo.
 RULES_FORBIDDEN_ROOTS = (VaultPath("_sistema"), VaultPath("_logs"), ARCHIVE_ROOT)

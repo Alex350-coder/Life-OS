@@ -184,7 +184,7 @@ def _import(registry: AgentRegistry, raw_path: str, out: TextIO) -> int:
         raise LifeOSError(f"no se pudo leer {path.name}: {error.strerror}") from None
     entry = registry.import_config(data, path.name)
     print(f"{entry.agent_id}: v{entry.current} en {entry.state}.", file=out)
-    view = next(v for v in registry.views() if v.entry.agent_id == entry.agent_id)
+    view = registry.view(entry.agent_id)
     if view.effective is not None:
         print("Permisos efectivos (solicitado ∩ política):", file=out)
         for line in _permissions_lines(view.effective):
@@ -196,7 +196,9 @@ def _import(registry: AgentRegistry, raw_path: str, out: TextIO) -> int:
 def _export(registry: AgentRegistry, args: argparse.Namespace, out: TextIO) -> int:
     data = registry.export(args.id, version=args.version)
     if args.salida is None:
-        out.write(data.decode("utf-8"))
+        # Un comentario del archivo no puede llevar secuencias de control a la terminal.
+        text = data.decode("utf-8", errors="replace")
+        out.write("".join(printable(line) + "\n" for line in text.splitlines()))
         return EXIT_OK
     target = Path(args.salida)
     try:
@@ -244,10 +246,12 @@ def _dispatch(runtime: Runtime, args: argparse.Namespace, out: TextIO) -> int:
         _print_result(_runner(runtime).run(args.id, week=_week(args.semana)), out)
     elif orden == "propuestas":
         pending = _review(runtime).pending(_week(args.semana))
-        if not pending:
+        if not pending.items:
             print("No hay propuestas pendientes.", file=out)
-        for review in pending:
+        for review in pending.items:
             print(_pending_line(review), file=out)
+        for problem in pending.skipped:
+            print(f"! Nota omitida: {printable(problem)}", file=out)
     elif orden == "aceptar":
         result = _review(runtime).accept(_ref(args.ref))
         task = f" (tarea {result.task_id})" if result.task_id else ""
