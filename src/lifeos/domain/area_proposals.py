@@ -160,8 +160,9 @@ def render_proposal(proposal: AreaProposal) -> str:
     lines = [
         f"# Propuestas de {proposal.agent_id} — {proposal.week}",
         "",
-        f"> Área: {proposal.area} · fuente: {proposal.source}. Estas propuestas no cambian nada"
-        " hasta que las aceptes (`lifeos propuestas` o la web).",
+        f"[area:: {proposal.area}] [fuente:: {proposal.source}]",
+        "",
+        "> Estas propuestas no cambian nada hasta que las aceptes (`lifeos propuestas` o la web).",
         "",
         *(_render_item(item) for item in proposal.items),
     ]
@@ -243,3 +244,19 @@ def _with(item: ProposalItem, status: ProposalStatus) -> ProposalItem:
         due=item.due,
         status=status,
     )
+
+
+_HEADER_AREA_RE = re.compile(r"^\[area:: ([a-z]+)\] \[fuente:: [a-z]+\]$")
+
+
+def proposal_area(text: str) -> Area | None:
+    """Área declarada en la cabecera que escribió el código; None si falta o no es válida."""
+    for line in text.splitlines():
+        match = _HEADER_AREA_RE.fullmatch(line.strip())
+        if match is not None:
+            try:
+                area = Area(match[1])
+            except ValueError:
+                return None
+            return area if area in SPECIALIST_AREAS else None
+    return None

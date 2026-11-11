@@ -12,6 +12,7 @@ from lifeos.domain.area_proposals import (
     ProposalRef,
     ProposalStatus,
     parse_proposal_note,
+    proposal_area,
     proposal_note_path,
     render_proposal,
     with_status,
@@ -200,3 +201,9 @@ def test_reference_parse(raw: str, expected: tuple[str, str, str]) -> None:
 def test_reference_parse_rejects_bad_input(raw: str) -> None:
     with pytest.raises(ValidationError):
         ProposalRef.parse(raw)
+
+
+def test_area_is_declared_in_header() -> None:
+    assert proposal_area(render_proposal(_proposal())) is Area.UNIVERSIDAD
+    assert proposal_area("# sin cabecera") is None
+    assert proposal_area("[area:: salud] [fuente:: ia]") is None
