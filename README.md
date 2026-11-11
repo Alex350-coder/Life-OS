@@ -22,7 +22,7 @@ Copia `.env.example` a `.env` y complétalo. Las variables del entorno del proce
 - `LIFEOS_TIMEZONE` (opcional): zona IANA; si se indica, debe coincidir con la de `_sistema/horario.md`.
 - Un `.env` mal formado detiene el arranque con un error de configuración (nunca muestra valores).
 
-La configuración declarativa vive en `config/`: `permissions.yaml` (política del propietario), `models.yaml` (proveedores y perfiles) y `agents/*.yaml` (Jefe y Coach). Al arrancar se valida todo junto; cualquier exceso o clave desconocida detiene el arranque.
+La configuración declarativa vive en `config/`: `permissions.yaml` (política del propietario), `models.yaml` (proveedores y perfiles) y `agents/*.yaml` (Jefe y Coach, el núcleo). Al arrancar se valida todo junto; cualquier exceso o clave desconocida detiene el arranque. `especialistas/*.yaml` son plantillas para importar con `lifeos-agentes` (Fase 8); no se cargan solas.
 
 ## Uso diario (Fase 3, ADR-0006 y ADR-0009)
 Antes de planificar, completa en tu bóveda `_sistema/horario.md` (plantilla en `../vault-template/_sistema/horario.md`, formato en `../docs/specs/horario-y-limites.md`). Sin `foco_max_dia`, `libre_min_dia` y `margen`, el Jefe no planifica (D-13).
@@ -152,6 +152,27 @@ uv run lifeos-calendario revocar                       # revoca en Google y borr
 - **Permisos separados.** Cada `conectar` pide un único permiso. Si Google concede otros, el token se revoca y no se guarda. Los tokens viven en `~/.lifeos` (`LIFEOS_TOKENS_DIR`), fuera de este proyecto y de OneDrive.
 - **Revocar.** Google revoca los dos permisos juntos. Si quitas el acceso desde tu cuenta de Google, Life OS lo detecta en el siguiente uso y pide volver a conectar. En modo de pruebas, Google caduca el acceso a los 7 días: basta con volver a conectar.
 
+## Especialistas y registro de agentes (Fase 8; ADR-0004 y ADR-0018)
+Universidad, Proyectos, Carrera y Hobbies leen solo su área y **proponen** al Jefe. No reservan tiempo ni cambian nada hasta que aceptas.
+
+```bash
+uv run lifeos-agentes importar config/especialistas/universidad.yaml   # queda en borrador
+uv run lifeos-agentes probar universidad [--ia]   # prueba sin escrituras; pasa a probado
+uv run lifeos-agentes aprobar universidad
+uv run lifeos-agentes activar universidad
+uv run lifeos-agentes ejecutar universidad [--semana 2026-W46] [--ia]   # escribe Propuestas/<semana>/universidad.md
+uv run lifeos-agentes propuestas [--semana 2026-W46]
+uv run lifeos-agentes aceptar 2026-W46/universidad/p1     # cambia la prioridad o crea la tarea
+uv run lifeos-agentes rechazar 2026-W46/universidad/p2
+uv run lifeos-agentes lista | desactivar <id> | restaurar <id> --version 1 | exportar <id> [--salida f.yaml]
+```
+- **Importar no activa ni concede nada.** Lo que pida más que `config/permissions.yaml` rechaza el archivo entero con todos los motivos. Una versión nueva exige subir `version` y vuelve a borrador.
+- **Restaurar** recupera la copia exacta de una versión anterior. Si ya estaba aprobada, queda aprobada: basta con activarla.
+- **Estado** en `state/agentes/` (`LIFEOS_STATE_DIR`): `registro.json` y una copia `vN.yaml` por versión. Antes de usar o exportar una copia se comprueba su sha256. Un candado entre procesos evita que la CLI y la web se pisen.
+- **Metas** por área en `<área>/metas.md`: `- [meta:: m1] Título [horizonte:: AAAA-MM-DD] [estado:: activa]`. Una tarea se enlaza con `[meta:: m1]`.
+- **Web:** pestaña Agentes, con importar o editar, probar, aprobar, activar, desactivar, restaurar, exportar, ejecutar y el panel de propuestas.
+- Salud y Finanzas siguen sin lectura de agentes (evaluación de privacidad F8-T03).
+
 ## Carga adaptativa (DT-01)
 `semana` mira los cierres de los últimos 7 días. Con al menos 3 días cerrados, calcula cuánto cumpliste: hecha cuenta 1, avance 0,5 y no realizada 0. Según eso, la propuesta usa:
 - el 100 % de `foco_max_dia` si cumpliste el 80 % o más;
@@ -180,6 +201,7 @@ Envía un texto fijo sin datos personales y deja un registro en `logs/usage-AAAA
 - `src/lifeos/cli/`: CLI `lifeos` (presentación, sin reglas de negocio).
 - `src/lifeos/web/`: API local FastAPI y guardia de acceso (presentación, sin reglas de negocio; Fase 5). Lecturas nuevas en `application/history.py`, `agents_overview.py`, `tasks.upcoming_tasks`, `JefePlanner.semana` y `domain/load.py`.
 - `src/lifeos/service/`: servicio `lifeos-servicio` (bucle, bot de Telegram; presentación, Fase 6). Rituales en `application/rituals.py`, `domain/rituals.py` y `domain/quiet.py`; adaptadores `telegram.py`, `whisper.py`, `json_state.py` y `process_lock.py`.
+- Fase 8: `domain/agent_lifecycle.py`, `areas.py`, `goals.py`, `area_proposals.py` y `specialist_heuristic.py`; `application/agent_registry.py`, `specialists.py` y `proposal_review.py`; `adapters/agent_store.py`; `cli/agents.py` (`lifeos-agentes`); `web/agents_routes.py` y `web/src/views/agents/`.
 - `web/`: frontend React + TypeScript (Vite); `web/dist/` lo sirve el backend y no se versiona.
 - `src/lifeos/bootstrap.py`: raíz de composición; único módulo que conecta adaptadores con casos de uso.
 - `scripts/`: utilidades manuales (verificación real del proveedor) y el servidor de pruebas E2E.
