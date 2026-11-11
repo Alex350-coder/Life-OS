@@ -176,7 +176,7 @@ describe("Propuestas", () => {
     const user = userEvent.setup();
     render(<AgentsView />);
     expect(await screen.findByText(/media →/)).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Aceptar" }));
+    await user.click(screen.getByRole("button", { name: `Aceptar ${review.ref}` }));
     expect(await screen.findByText(`Aceptada ${review.ref}.`)).toBeInTheDocument();
     expect(await screen.findByText("No hay propuestas pendientes.")).toBeInTheDocument();
     expect(calls.find((c) => c.url === "/api/propuestas/aceptacion")?.body).toEqual({ ref: review.ref });
@@ -190,8 +190,102 @@ describe("Propuestas", () => {
     });
     const user = userEvent.setup();
     render(<AgentsView />);
-    await user.click(await screen.findByRole("button", { name: "Rechazar" }));
+    await user.click(await screen.findByRole("button", { name: `Rechazar ${review.ref}` }));
     expect(await screen.findByText("propuesta: ya está aceptada")).toBeInTheDocument();
     expect(screen.getByText(review.ref)).toBeInTheDocument();
+  });
+});
+
+describe("Ciclo de vida en la tarjeta", () => {
+  it("aprobar envía la acción y recarga; ejecutar solo se habilita si está activo", async () => {
+    const tested = imported({ state: "probado" });
+    let current = tested;
+    const calls = installFakeApi({
+      "GET /api/agentes": () => ok(agents([current])),
+      "GET /api/propuestas": ok({ items: [] }),
+      "POST /api/agentes/universidad/estado": () => {
+        current = imported({ state: "aprobado" });
+        return ok(current);
+      },
+    });
+    const user = userEvent.setup();
+    render(<AgentsView />);
+    expect(await screen.findByRole("button", { name: "Ejecutar" })).toBeDisabled();
+    await user.click(screen.getByRole("button", { name: "Aprobar" }));
+    expect(await screen.findByRole("button", { name: "Activar" })).toBeInTheDocument();
+    expect(calls.find((c) => c.url === "/api/agentes/universidad/estado")?.body).toEqual({ accion: "aprobar" });
+    expect(calls.filter((c) => c.url === "/api/agentes").length).toBeGreaterThan(1);
+  });
+
+  it("exportar muestra el archivo como texto", async () => {
+    installFakeApi({
+      "GET /api/agentes": ok(agents([imported()])),
+      "GET /api/propuestas": ok({ items: [] }),
+      "GET /api/agentes/universidad/exportacion": ok({ version: 1, contenido: `id: universidad # ${XSS}` }),
+    });
+    const user = userEvent.setup();
+    const { container } = render(<AgentsView />);
+    await user.click(await screen.findByRole("button", { name: "Exportar" }));
+    expect(await screen.findByText(/id: universidad #/)).toBeInTheDocument();
+    expect(container.querySelector("img")).toBeNull();
+  });
+
+  it("restaurar ofrece otra versión aunque la actual sea la primera", async () => {
+    const back = imported({
+      state: "aprobado",
+      current: 1,
+      versions: [
+        { number: 1, config_version: 1, sha256: "aaaaaaaaaaaa", imported_at: "2026-11-01T20:00:00-05:00" },
+        { number: 2, config_version: 2, sha256: "bbbbbbbbbbbb", imported_at: "2026-11-02T20:00:00-05:00" },
+      ],
+    });
+    const calls = installFakeApi({
+      "GET /api/agentes": ok(agents([back])),
+      "GET /api/propuestas": ok({ items: [] }),
+      "POST /api/agentes/universidad/estado": ok(back),
+    });
+    const user = userEvent.setup();
+    render(<AgentsView />);
+    const restore = await screen.findByRole("button", { name: "Restaurar" });
+    expect(restore).toBeEnabled();
+    await user.click(restore);
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === "/api/agentes/universidad/estado")?.body).toEqual({
+        accion: "restaurar",
+        version: 2,
+      }),
+    );
+  });
+
+  it("un archivo demasiado grande no se carga", async () => {
+    installFakeApi({ "GET /api/agentes": ok(agents()), "GET /api/propuestas": ok({ items: [] }) });
+    const user = userEvent.setup();
+    render(<AgentsView />);
+    const big = new File(["#".repeat(33 * 1024)], "grande.yaml", { type: "text/yaml" });
+    await user.upload(await screen.findByLabelText("Archivo"), big);
+    expect(await screen.findByText(/supera 32 KiB/)).toBeInTheDocument();
+    expect(screen.getByLabelText("Configuración YAML")).toHaveValue("");
+  });
+
+  it("un archivo válido rellena el texto y sanea el nombre", async () => {
+    const calls = installFakeApi({
+      "GET /api/agentes": ok(agents()),
+      "GET /api/propuestas": ok({ items: [] }),
+      "POST /api/agentes/importacion": { status: 201, body: { ok: true, data: imported() } },
+    });
+    const user = userEvent.setup();
+    render(<AgentsView />);
+    const content = "id: universidad\n";
+    const file = new File([content], "mi agente.yaml", { type: "text/yaml" });
+    await user.upload(await screen.findByLabelText("Archivo"), file);
+    await waitFor(() => expect(screen.getByLabelText("Configuración YAML")).toHaveValue(content));
+    await user.click(screen.getByRole("button", { name: "Importar en borrador" }));
+    await waitFor(() =>
+      expect(calls.find((c) => c.url === "/api/agentes/importacion")?.body).toEqual({
+        nombre: "mi_agente.yaml",
+        contenido: content,
+      }),
+    );
+    expect(calls.some((c) => c.url.endsWith("/estado"))).toBe(false);
   });
 });

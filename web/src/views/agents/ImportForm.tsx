@@ -12,24 +12,35 @@ function violations(error: unknown): string[] {
 }
 
 // Importar o editar: pegar el YAML o elegir un archivo. Importar nunca activa (RULES E.10).
-export function ImportForm({ onImported, initial = "" }: { onImported: () => void; initial?: string }) {
+type Props = { onImported: () => void };
+
+export function ImportForm({ onImported }: Props) {
   const [name, setName] = useState("agente.yaml");
-  const [text, setText] = useState(initial);
+  const [text, setText] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [problems, setProblems] = useState<string[]>([]);
   const [done, setDone] = useState<string | null>(null);
 
   async function choose(event: ChangeEvent<HTMLInputElement>) {
-    const file = event.target.files?.[0];
+    const input = event.target;
+    const file = input.files?.[0];
     if (file === undefined) return;
+    setDone(null);
+    setProblems([]);
     if (file.size > MAX_AGENT_FILE) {
       setError(`El archivo supera ${MAX_AGENT_FILE / 1024} KiB.`);
+      input.value = "";
       return;
     }
-    setName(file.name.replace(/[^A-Za-z0-9._-]/g, "_") || "agente.yaml");
-    setText(await file.text());
-    setError(null);
+    try {
+      setText(await file.text());
+      setName(file.name.replace(/[^A-Za-z0-9._-]/g, "_") || "agente.yaml");
+      setError(null);
+    } catch {
+      setError("No se pudo leer el archivo.");
+      input.value = "";
+    }
   }
 
   async function submit(event: FormEvent) {
@@ -52,7 +63,7 @@ export function ImportForm({ onImported, initial = "" }: { onImported: () => voi
 
   return (
     <form className="card" onSubmit={submit} aria-labelledby="import-heading">
-      <h3 id="import-heading">Importar o editar un agente</h3>
+      <h2 id="import-heading">Importar o editar un agente</h2>
       <p className="muted small">
         Pega el YAML (o elige un archivo). Para editar, exporta, cambia y sube <code>version</code>. Se
         registra en borrador: no se activa ni recibe más permisos que tu política.
@@ -85,8 +96,8 @@ export function ImportForm({ onImported, initial = "" }: { onImported: () => voi
           <p>{error}</p>
           {problems.length > 0 && (
             <ul>
-              {problems.map((problem) => (
-                <li key={problem}>{problem}</li>
+              {problems.map((problem, index) => (
+                <li key={`${index}-${problem}`}>{problem}</li>
               ))}
             </ul>
           )}

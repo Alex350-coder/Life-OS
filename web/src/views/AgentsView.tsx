@@ -87,7 +87,7 @@ export function AgentsView() {
               {data.agents.map((agent) => (
                 <AgentCard key={agent.id} agent={agent} />
               ))}
-              <h2>Especialistas importados</h2>
+              <h3>Especialistas importados</h3>
               {imported.length === 0 && <p className="muted">Aún no has importado ningún agente.</p>}
               {imported.map((agent) => (
                 <ImportedAgentCard key={agent.id} agent={agent} onChanged={changed} />
