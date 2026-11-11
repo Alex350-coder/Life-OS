@@ -198,6 +198,8 @@ export interface Agents {
   forbidden_write: string[];
   restricted_read: string[];
   usage_malformed: number;
+  // Agentes importados (Fase 8); ausente en respuestas anteriores.
+  imported?: ImportedAgent[];
 }
 
 export interface ClosingAnswer {
@@ -205,4 +207,70 @@ export interface ClosingAnswer {
   tipo: "hecha" | "parcial" | "no";
   avance?: string;
   restante?: string;
+}
+
+// --- Registro de agentes y propuestas (Fase 8) ---------------------------------------------
+
+export type AgentState = "borrador" | "probado" | "aprobado" | "activo" | "desactivado";
+
+export interface AgentVersion {
+  number: number;
+  config_version: number;
+  sha256: string;
+  imported_at: string;
+}
+
+export interface Effective {
+  reads: string[];
+  writes: Grant[];
+  tools: string[];
+}
+
+export interface ImportedAgent {
+  id: string;
+  name: string;
+  purpose: string;
+  area: string | null;
+  profile: string | null;
+  state: AgentState;
+  current: number;
+  versions: AgentVersion[];
+  history: { at: string; action: string; state: string; version: number }[];
+  effective: Effective | null;
+  problems: string[];
+}
+
+export interface ProposalItem {
+  key: string;
+  kind: "prioridad" | "nueva_tarea";
+  priority: string;
+  reason: string;
+  task_id: string | null;
+  title: string | null;
+  effort: string | null;
+  due: string | null;
+  status: string;
+}
+
+export interface RunResult {
+  agent_id: string;
+  week: string;
+  source: string;
+  dry_run: boolean;
+  recorded_test: boolean;
+  path: string | null;
+  items: ProposalItem[];
+  alerts: string[];
+}
+
+export interface ReviewItem extends ProposalItem {
+  ref: string;
+  area: string | null;
+  task_title: string | null;
+  current_priority: string | null;
+}
+
+export interface Exported {
+  version: number;
+  contenido: string;
 }
