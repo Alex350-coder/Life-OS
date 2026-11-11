@@ -6,12 +6,16 @@ from typing import Any
 
 import pytest
 
-from tests.web.conftest import PROJECT, Web
+from tests.web.conftest import ORIGIN, PROJECT, Web
 
 pytestmark = [pytest.mark.integration, pytest.mark.security]
 
 TEMPLATE = (PROJECT / "config" / "especialistas" / "universidad.yaml").read_text(encoding="utf-8")
 DUE = "\U0001f4c5"
+
+
+def _post(web: Web, path: str, body: object, csrf: str) -> Any:
+    return web.client.post(path, json=body, headers={"X-CSRF-Token": csrf, "Origin": ORIGIN})
 
 
 def _data(response: Any) -> Any:
@@ -21,16 +25,16 @@ def _data(response: Any) -> Any:
 
 
 def _import(web: Web, csrf: str, text: str = TEMPLATE) -> Any:
-    return web.post(
-        "/api/agentes/importacion", {"nombre": "universidad.yaml", "contenido": text}, csrf
+    return _post(
+        web, "/api/agentes/importacion", {"nombre": "universidad.yaml", "contenido": text}, csrf
     )
 
 
 def _activate(web: Web, csrf: str) -> None:
     assert _import(web, csrf).status_code == 201
-    assert web.post("/api/agentes/universidad/prueba", {}, csrf).status_code == 200
+    assert _post(web, "/api/agentes/universidad/prueba", {}, csrf).status_code == 200
     for action in ("aprobar", "activar"):
-        response = web.post("/api/agentes/universidad/estado", {"accion": action}, csrf)
+        response = _post(web, "/api/agentes/universidad/estado", {"accion": action}, csrf)
         assert response.status_code == 200, response.text
 
 
@@ -109,7 +113,7 @@ def test_lifecycle_run_and_review_through_the_api(web: Web) -> None:
     )
     _activate(web, csrf)
 
-    run = web.post("/api/agentes/universidad/ejecucion", {"semana": "2026-W45"}, csrf)
+    run = _post(web, "/api/agentes/universidad/ejecucion", {"semana": "2026-W45"}, csrf)
     assert run.status_code == 200, run.text
     assert _data(run)["path"] == "Propuestas/2026-W45/universidad.md"
 
@@ -118,7 +122,7 @@ def test_lifecycle_run_and_review_through_the_api(web: Web) -> None:
     target = next(p for p in pending["items"] if p["task_id"] == "t-abc234")
     assert target["current_priority"] == "media" and target["priority"] == "alta"
 
-    accepted = web.post("/api/propuestas/aceptacion", {"ref": target["ref"]}, csrf)
+    accepted = _post(web, "/api/propuestas/aceptacion", {"ref": target["ref"]}, csrf)
     assert accepted.status_code == 200, accepted.text
     assert "[prioridad:: alta]" in web.note("01-Universidad/examen.md")
     left = _data(web.client.get("/api/propuestas", params={"semana": "2026-W45"}))["items"]
@@ -128,9 +132,9 @@ def test_lifecycle_run_and_review_through_the_api(web: Web) -> None:
 def test_deactivated_agent_cannot_run(web: Web) -> None:
     csrf = web.login()
     _activate(web, csrf)
-    web.post("/api/agentes/universidad/estado", {"accion": "desactivar"}, csrf)
+    _post(web, "/api/agentes/universidad/estado", {"accion": "desactivar"}, csrf)
 
-    response = web.post("/api/agentes/universidad/ejecucion", {}, csrf)
+    response = _post(web, "/api/agentes/universidad/ejecucion", {}, csrf)
 
     assert response.status_code == 409
     assert "desactivado" in response.json()["error"]["message"]
@@ -150,7 +154,7 @@ def test_restore_requires_a_version(web: Web) -> None:
     csrf = web.login()
     _import(web, csrf)
 
-    response = web.post("/api/agentes/universidad/estado", {"accion": "restaurar"}, csrf)
+    response = _post(web, "/api/agentes/universidad/estado", {"accion": "restaurar"}, csrf)
 
     assert response.status_code == 409
 
@@ -159,7 +163,7 @@ def test_restore_requires_a_version(web: Web) -> None:
 def test_agent_id_in_path_is_validated(web: Web, agent_id: str) -> None:
     csrf = web.login()
 
-    response = web.post(f"/api/agentes/{agent_id}/prueba", {}, csrf)
+    response = _post(web, f"/api/agentes/{agent_id}/prueba", {}, csrf)
 
     assert response.status_code in (404, 405, 422)
 
@@ -168,7 +172,7 @@ def test_unknown_action_is_422(web: Web) -> None:
     csrf = web.login()
     _import(web, csrf)
 
-    response = web.post("/api/agentes/universidad/estado", {"accion": "probar"}, csrf)
+    response = _post(web, "/api/agentes/universidad/estado", {"accion": "probar"}, csrf)
 
     assert response.status_code == 422
 
@@ -176,7 +180,7 @@ def test_unknown_action_is_422(web: Web) -> None:
 def test_bad_proposal_ref_is_422(web: Web) -> None:
     csrf = web.login()
 
-    response = web.post("/api/propuestas/rechazo", {"ref": "../../_sistema/p1"}, csrf)
+    response = _post(web, "/api/propuestas/rechazo", {"ref": "../../_sistema/p1"}, csrf)
 
     assert response.status_code == 422
 
