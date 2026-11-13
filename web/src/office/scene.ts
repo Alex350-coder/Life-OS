@@ -42,7 +42,7 @@ function short(text: string): string {
   return text.length <= MAX_BUBBLE ? text : `${text.slice(0, MAX_BUBBLE - 1)}…`;
 }
 
-function workDone(work: PlanBlock[], now: Date): { done: number; total: number } {
+export function workDone(work: PlanBlock[], now: Date): { done: number; total: number } {
   let done = 0;
   let total = 0;
   for (const block of work) {
