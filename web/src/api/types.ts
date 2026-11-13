@@ -274,3 +274,36 @@ export interface Exported {
   version: number;
   contenido: string;
 }
+
+// Indicadores de PLAN §13 y carga de avisos (F9-T03). `null` = desconocido, nunca 0.
+export interface RitualCost {
+  agent: string;
+  ritual: string;
+  calls: number;
+  errors: number;
+  latency_median_ms: number;
+  latency_p95_ms: number;
+  cost_estimated_usd: string;
+  cost_unknown: number;
+}
+
+export interface Indicators {
+  start: string;
+  end: string;
+  deliveries: { due: number; completed: number; forgotten: number; percent: number | null };
+  adherence: { closed_days: number; answered: number; percent: number | null };
+  usage: { active_days: number; days_per_week: number };
+  acceptance: { proposed: number; approved: number; minor_changes: number; percent: number | null };
+  costs: RitualCost[];
+  notifications: {
+    sent: number;
+    failed: number;
+    skipped: number;
+    days_with_notifications: number;
+    max_per_day: number;
+    per_active_day: number | null;
+    by_kind: { kind: string; count: number }[];
+  };
+  not_measured: { name: string; reason: string }[];
+  quality: { malformed_log_lines: number; unreadable_notes: number };
+}
