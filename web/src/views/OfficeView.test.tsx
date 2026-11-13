@@ -28,7 +28,7 @@ const INDICATORS: Indicators = {
   costs: [],
   notifications: { sent: 0, failed: 0, skipped: 0, days_with_notifications: 0, max_per_day: 0, per_active_day: null, by_kind: [] },
   not_measured: [],
-  quality: { malformed_log_lines: 0, unreadable_notes: 0 },
+  quality: { malformed_log_lines: 0, unreadable_notes: 0, invalid_task_lines: 0, unreadable_closings: 0 },
 };
 
 afterEach(() => {
@@ -95,6 +95,12 @@ describe("Oficina, Fase 9", () => {
     await act(async () => {
       await vi.advanceTimersByTimeAsync(60_000);
     });
-    expect(await screen.findByRole("status")).toHaveTextContent("Último evento: ¡Check-in registrado!");
+    const status = await screen.findByRole("status");
+    await waitFor(() => expect(status).toHaveTextContent(/^\d{2}:\d{2} · ¡Check-in registrado!$/));
+    // Caduca a los 4 s: el texto se vacía y un evento igual más tarde se vuelve a anunciar.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(4_000);
+    });
+    await waitFor(() => expect(status.textContent).toBe(""));
   });
 });

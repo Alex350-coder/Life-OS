@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent, type RefObject } from "react";
 import { get } from "../api/client";
 import type { Agents, Briefing, Indicators } from "../api/types";
 import { useApi } from "../api/useApi";
@@ -11,7 +11,7 @@ import { buildScene } from "../office/scene";
 import { SEASON_LABEL } from "../office/season";
 import { MyDayPanel } from "./MyDayPanel";
 
-const REFRESH_MS = 60_000; // los datos del día se recargan cada minuto
+const REFRESH_MS = 60_000; // los datos del día se recargan cada minuto (solo si se ve)
 const STREAK_DAYS = 90; // ventana de /api/indicadores para la racha (se pide una vez)
 
 interface Timed extends Reaction {
@@ -20,10 +20,6 @@ interface Timed extends Reaction {
 
 function clockText(now: Date): string {
   return now.toLocaleTimeString("es", { hour: "2-digit", minute: "2-digit" });
-}
-
-function active(reactions: Timed[], at: number): Timed[] {
-  return reactions.filter((r) => at - r.at < REACTION_MS);
 }
 
 // La última lectura válida de /api/hoy: al recargar cada minuto la escena no parpadea y se puede
@@ -36,9 +32,41 @@ function useLatestDay(data: Briefing | null, now: Date): { day: Briefing | null;
     const at = now.getTime(); // hora de la recarga que trajo estos datos
     const found = detectReactions(day, data, now);
     setDay(data);
-    if (found.length > 0) setReactions([...active(reactions, at), ...found.map((r) => ({ ...r, at }))]);
+    if (found.length > 0) {
+      const recent = reactions.filter((r) => at - r.at < REACTION_MS);
+      setReactions([...recent, ...found.map((r) => ({ ...r, at }))]);
+    }
   }
   return { day, reactions };
+}
+
+// Las reacciones duran REACTION_MS: un temporizador marca cuándo caducaron (en el canvas, en el
+// fotograma fijo y en el texto anunciado), sin leer la hora durante el render.
+function useActiveReactions(reactions: Timed[]): Timed[] {
+  const [expiredAt, setExpiredAt] = useState(0);
+  useEffect(() => {
+    const last = reactions.at(-1);
+    if (last === undefined) return;
+    const timer = window.setTimeout(() => setExpiredAt(last.at + REACTION_MS), REACTION_MS);
+    return () => window.clearTimeout(timer);
+  }, [reactions]);
+  return useMemo(() => reactions.filter((r) => r.at + REACTION_MS > expiredAt), [reactions, expiredAt]);
+}
+
+// ¿Se ve el canvas? Las pestañas visitadas siguen montadas pero ocultas: sin observador
+// (jsdom) se supone visible.
+function useVisible(target: RefObject<HTMLElement | null>): boolean {
+  const [visible, setVisible] = useState(true);
+  useEffect(() => {
+    const element = target.current;
+    if (element === null || typeof IntersectionObserver === "undefined") return;
+    const observer = new IntersectionObserver((entries) => {
+      setVisible(entries.some((entry) => entry.isIntersecting));
+    });
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [target]);
+  return visible;
 }
 
 // Oficina visual (docs/specs/interfaz-grafica.md, ADR-0019): la misma información que Hoy y
@@ -51,45 +79,53 @@ export function OfficeView() {
   const indicators = useApi(() => get<Indicators>("/api/indicadores", { dias: STREAK_DAYS }), "oficina-racha");
   const canvas = useRef<HTMLCanvasElement>(null);
   const hits = useRef<HitBox[]>([]);
+  const frame = useRef(0); // sobrevive a las recargas: la animación no salta cada minuto
   const [now, setNow] = useState(() => new Date());
   const { day, reactions } = useLatestDay(today.data, now);
+  const shown = useActiveReactions(reactions);
+  const visible = useVisible(canvas);
 
+  // Recarga cada minuto mientras se ve; al volver a verse, recarga enseguida.
   useEffect(() => {
-    const refresh = window.setInterval(() => {
+    if (!visible) return;
+    const refresh = () => {
       setTick((n) => n + 1);
       setNow(new Date());
-    }, REFRESH_MS);
-    return () => window.clearInterval(refresh);
-  }, []);
+    };
+    const timer = window.setInterval(refresh, REFRESH_MS);
+    return () => window.clearInterval(timer);
+  }, [visible]);
+  const [seen, setSeen] = useState(visible);
+  if (visible !== seen) {
+    setSeen(visible);
+    if (visible) setTick((n) => n + 1);
+  }
 
   const scene = useMemo(() => buildScene(day, agents.data?.agents ?? [], now), [day, agents.data, now]);
+  const clock = clockText(now);
 
   useEffect(() => {
     const ctx = canvas.current?.getContext("2d") ?? null;
-    if (ctx === null) return; // sin canvas (jsdom o navegador sin soporte): queda la lista
-    const clock = clockText(now);
+    if (ctx === null || !visible) return; // sin canvas (jsdom) queda la lista; oculta, no se dibuja
     if (prefersReducedMotion()) {
-      // Un fotograma fijo; las reacciones se ven en el texto de abajo.
-      hits.current = drawOffice(ctx, scene, STILL_FRAME, clock, active(reactions, Date.now()));
+      // Un fotograma fijo; las reacciones también se anuncian en el texto de abajo.
+      hits.current = drawOffice(ctx, scene, STILL_FRAME, clock, shown);
       return;
     }
     const interval = frameInterval(navigator as Navigator & { deviceMemory?: number });
-    let frame = 0;
     let last = 0;
     let handle = 0;
     const loop = (time: number) => {
-      // Oculta (otra pestaña de la web o del navegador): no se dibuja, no se gasta CPU.
-      const visible = !document.hidden && canvas.current?.offsetParent !== null;
-      if (visible && time - last >= interval) {
+      if (!document.hidden && time - last >= interval) {
         last = time;
-        frame += 1;
-        hits.current = drawOffice(ctx, scene, frame, clock, active(reactions, Date.now()));
+        frame.current += 1;
+        hits.current = drawOffice(ctx, scene, frame.current, clock, shown);
       }
       handle = window.requestAnimationFrame(loop);
     };
     handle = window.requestAnimationFrame(loop);
     return () => window.cancelAnimationFrame(handle);
-  }, [scene, now, reactions]);
+  }, [scene, clock, shown, visible]);
 
   function open(id: string) {
     const character = scene.characters.find((c) => c.id === id);
@@ -104,7 +140,7 @@ export function OfficeView() {
     if (id !== null) open(id);
   }
 
-  const latest = reactions.at(-1);
+  const latest = shown.at(-1);
   return (
     <div className="view">
       <ErrorBanner error={today.error ?? agents.error} />
@@ -129,7 +165,7 @@ export function OfficeView() {
           onClick={handleClick}
         />
         <p role="status" className="office-event">
-          {latest === undefined ? "" : `Último evento: ${latest.text}`}
+          {latest === undefined ? "" : `${clockText(new Date(latest.at))} · ${latest.text}`}
         </p>
         <MyDayPanel day={day} indicators={indicators.data} now={now} />
         {scene.pause !== null && (

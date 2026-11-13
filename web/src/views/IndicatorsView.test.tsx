@@ -21,7 +21,7 @@ function indicators(overrides: Partial<Indicators> = {}): Indicators {
       by_kind: [{ kind: "briefing", count: 3 }],
     },
     not_measured: [{ name: "Utilidad y nivel de estrés", reason: "valoración del propietario" }],
-    quality: { malformed_log_lines: 0, unreadable_notes: 0 },
+    quality: { malformed_log_lines: 0, unreadable_notes: 0, invalid_task_lines: 0, unreadable_closings: 0 },
     ...overrides,
   };
 }
@@ -51,13 +51,15 @@ describe("IndicatorsView", () => {
   it("muestra los costos como texto y avisa de las líneas ilegibles", async () => {
     const data = indicators({
       costs: [{ agent: XSS, ritual: "propuesta", calls: 2, errors: 0, latency_median_ms: 800, latency_p95_ms: 1200, cost_estimated_usd: "0", cost_unknown: 2 }],
-      quality: { malformed_log_lines: 3, unreadable_notes: 0 },
+      quality: { malformed_log_lines: 3, unreadable_notes: 0, invalid_task_lines: 2, unreadable_closings: 1 },
     });
     installFakeApi({ "GET /api/indicadores": ok(data) });
     const { container } = render(<IndicatorsView />);
     expect(await screen.findByText(/2 sin costo conocido/)).toBeInTheDocument();
     expect(container.querySelector("img")).toBeNull();
-    expect(screen.getByText(/3 línea\(s\) de log/)).toBeInTheDocument();
+    expect(
+      screen.getByText(/No cuentan: 3 líneas de log ilegibles; 2 líneas de tareas con formato no válido; 1 cierres/),
+    ).toBeInTheDocument();
   });
 
   it("muestra el error del servidor", async () => {

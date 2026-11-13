@@ -307,5 +307,10 @@ export interface Indicators {
     by_kind: { kind: string; count: number }[];
   };
   not_measured: { name: string; reason: string }[];
-  quality: { malformed_log_lines: number; unreadable_notes: number };
+  quality: {
+    malformed_log_lines: number;
+    unreadable_notes: number;
+    invalid_task_lines: number;
+    unreadable_closings: number;
+  };
 }

@@ -56,7 +56,7 @@ function indicators(overrides: Partial<Indicators> = {}): Indicators {
     costs: [],
     notifications: { sent: 0, failed: 0, skipped: 0, days_with_notifications: 0, max_per_day: 0, per_active_day: null, by_kind: [] },
     not_measured: [],
-    quality: { malformed_log_lines: 0, unreadable_notes: 0 },
+    quality: { malformed_log_lines: 0, unreadable_notes: 0, invalid_task_lines: 0, unreadable_closings: 0 },
     ...overrides,
   };
 }

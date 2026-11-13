@@ -47,7 +47,7 @@ export function MyDayPanel({ day, indicators, now }: Props) {
         </div>
       </dl>
       {summary.overLimit && (
-        <p className="banner banner-warn">El trabajo planificado hoy supera tu foco_max_dia.</p>
+        <p className="banner banner-warn">El trabajo planificado hoy supera tu límite de foco diario.</p>
       )}
       <p className="muted">{summary.cheer}</p>
     </section>

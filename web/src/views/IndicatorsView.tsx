@@ -100,6 +100,18 @@ function Costs({ rows }: { rows: Indicators["costs"] }) {
   );
 }
 
+function QualityWarning({ quality }: { quality: Indicators["quality"] }) {
+  const found = [
+    [quality.malformed_log_lines, "líneas de log ilegibles"],
+    [quality.unreadable_notes, "notas que no se pudieron leer"],
+    [quality.invalid_task_lines, "líneas de tareas con formato no válido"],
+    [quality.unreadable_closings, "cierres sin respuestas reconocibles"],
+  ] as const;
+  const text = found.filter(([count]) => count > 0).map(([count, what]) => `${count} ${what}`);
+  if (text.length === 0) return null;
+  return <p className="banner banner-warn">No cuentan: {text.join("; ")}.</p>;
+}
+
 export function IndicatorsView() {
   const [days, setDays] = useState<WindowDays>(28);
   const report = useApi(() => get<Indicators>("/api/indicadores", { dias: days }), `indicadores-${days}`);
@@ -139,12 +151,7 @@ export function IndicatorsView() {
                   </li>
                 ))}
               </ul>
-              {(data.quality.malformed_log_lines > 0 || data.quality.unreadable_notes > 0) && (
-                <p className="banner banner-warn">
-                  {data.quality.malformed_log_lines} línea(s) de log y {data.quality.unreadable_notes} nota(s) o
-                  tarea(s) no se pudieron leer y no cuentan.
-                </p>
-              )}
+              <QualityWarning quality={data.quality} />
             </>
           )}
         </Loading>
