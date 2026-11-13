@@ -14,6 +14,7 @@ from lifeos.application.indicators import (
     MAX_WINDOW_DAYS,
     PlanWeek,
     Window,
+    closing_streak,
     deliveries,
     notification_load,
     plan_acceptance,
@@ -214,3 +215,19 @@ class TestNotificationLoad:
     def test_no_rituals_gives_zero_counts_and_unknown_average(self) -> None:
         load = notification_load([], WINDOW, LIMA)
         assert (load.sent, load.max_per_day, load.per_active_day) == (0, 0, None)
+
+
+class TestClosingStreak:
+    def test_counts_consecutive_days_ending_today(self) -> None:
+        days = [TODAY, TODAY - timedelta(days=1), TODAY - timedelta(days=2), TODAY - timedelta(4)]
+        assert closing_streak(days, TODAY) == 3
+
+    def test_today_not_closed_yet_keeps_yesterdays_streak(self) -> None:
+        days = [TODAY - timedelta(days=1), TODAY - timedelta(days=2)]
+        assert closing_streak(days, TODAY) == 2
+
+    def test_a_gap_before_yesterday_breaks_it(self) -> None:
+        assert closing_streak([TODAY - timedelta(days=2)], TODAY) == 0
+
+    def test_without_closings_it_is_zero(self) -> None:
+        assert closing_streak([], TODAY) == 0

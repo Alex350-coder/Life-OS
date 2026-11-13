@@ -290,6 +290,8 @@ export interface RitualCost {
 export interface Indicators {
   start: string;
   end: string;
+  streak: number; // días seguidos con cierre
+  focus_max_minutes: number; // foco_max_dia de horario.md
   deliveries: { due: number; completed: number; forgotten: number; percent: number | null };
   adherence: { closed_days: number; answered: number; percent: number | null };
   usage: { active_days: number; days_per_week: number };

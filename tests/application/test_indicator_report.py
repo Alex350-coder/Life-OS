@@ -89,6 +89,7 @@ def test_report_reads_vault_and_logs(
     assert report.deliveries.forgotten == 1
     assert (report.adherence.closed_days, report.adherence.percent) == (1, 100)
     assert report.usage.active_days == 2
+    assert (report.streak, report.focus_max_minutes) == (0, 240)  # cierre del 10, hoy es 13
     assert (report.acceptance.approved, report.acceptance.minor_changes) == (2, 2)
     assert [(c.calls, c.latency_median_ms) for c in report.costs] == [(1, 1200)]
     assert report.costs[0].cost_estimated == Decimal(0)

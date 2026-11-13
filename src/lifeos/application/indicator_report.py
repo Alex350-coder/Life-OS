@@ -6,7 +6,7 @@ no puede medir se listan con su motivo para que el propietario los valore a mano
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, datetime, time, timedelta
+from datetime import UTC, date, datetime, time, timedelta
 
 from lifeos.application.indicators import (
     Acceptance,
@@ -17,6 +17,7 @@ from lifeos.application.indicators import (
     RitualCost,
     UsageFrequency,
     Window,
+    closing_streak,
     deliveries,
     notification_load,
     plan_acceptance,
@@ -64,6 +65,8 @@ class IndicatorReport:
     window: Window
     deliveries: DeliveryStats
     adherence: Adherence
+    streak: int  # días seguidos con cierre (Oficina, panel «Mi día»)
+    focus_max_minutes: int  # foco_max_dia de horario.md
     usage: UsageFrequency
     acceptance: Acceptance
     costs: tuple[RitualCost, ...]
@@ -91,12 +94,14 @@ def _read(vault: VaultStore, path: str) -> str | None:
         return None
 
 
-def _closing_scores(vault: VaultStore, window: Window) -> Iterator[DayScore]:
+def _closing_scores(vault: VaultStore, window: Window) -> dict[date, DayScore]:
+    scores: dict[date, DayScore] = {}
     for day in window.days():
         text = _read(vault, daily_path(day))
         score = closing_score(text) if text is not None else None
         if score is not None:
-            yield score
+            scores[day] = score
+    return scores
 
 
 def _weeks(window: Window) -> list[IsoWeek]:
@@ -156,19 +161,23 @@ def measure_indicators(
         text = _read(vault, HORARIO_NOTE)
         if text is None:
             raise ApplicationError(f"falta {HORARIO_NOTE}: los indicadores usan su zona horaria")
-        zone = parse_horario(text).zone
+        schedule = parse_horario(text)
     except (VaultIOError, HorarioError) as error:
         raise ApplicationError(f"no se pudo usar {HORARIO_NOTE}: {error}") from error
+    zone = schedule.zone
     today = now.astimezone(zone).date()
     window = Window.ending(today, days=days)
     report = scan(vault)
+    scores = _closing_scores(vault, window)
     usage, audit, malformed = _logs(usage_reader, audit_reader, window)
     start = datetime.combine(window.start, time(), zone).astimezone(UTC)
     end = datetime.combine(window.end + timedelta(days=1), time(), zone).astimezone(UTC)
     return IndicatorReport(
         window=window,
         deliveries=deliveries((t.task for t in report.tasks), window, today),
-        adherence=plan_adherence(_closing_scores(vault, window)),
+        adherence=plan_adherence(scores.values()),
+        streak=closing_streak(scores, today),
+        focus_max_minutes=schedule.limits.focus_max,
         usage=usage_frequency(audit, window, zone),
         acceptance=plan_acceptance(_plan_weeks(vault, window)),
         costs=ritual_costs(r for r in usage if _in_window(r, start, end)),

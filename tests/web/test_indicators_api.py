@@ -15,6 +15,7 @@ def test_returns_the_report_with_unknowns_as_null(web: Web) -> None:
     assert data["adherence"]["percent"] is None
     assert data["notifications"]["per_active_day"] is None
     assert data["costs"] == []
+    assert (data["streak"], data["focus_max_minutes"]) == (0, 240)
     assert {item["name"] for item in data["not_measured"]} >= {"Utilidad y nivel de estrés"}
     assert data["end"] == "2026-11-01"  # NOW en UTC ya es 1 de noviembre en Lima
 

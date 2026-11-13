@@ -60,6 +60,8 @@ def serialize(report: IndicatorReport) -> Json:
             "forgotten": d.forgotten,
             "percent": d.percent,
         },
+        "streak": report.streak,
+        "focus_max_minutes": report.focus_max_minutes,
         "adherence": {"closed_days": a.closed_days, "answered": a.answered, "percent": a.percent},
         "usage": {"active_days": u.active_days, "days_per_week": u.days_per_week},
         "acceptance": {

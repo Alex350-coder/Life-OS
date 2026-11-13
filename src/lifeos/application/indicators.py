@@ -107,6 +107,17 @@ def plan_adherence(scores: Iterable[DayScore]) -> Adherence:
     return Adherence(len(days), answered, _percent(points, answered))
 
 
+def closing_streak(closed_days: Iterable[date], today: date) -> int:
+    """Días seguidos con cierre hasta hoy; si hoy aún no se cerró, hasta ayer (sin castigar)."""
+    closed = set(closed_days)
+    day = today if today in closed else today - timedelta(days=1)
+    streak = 0
+    while day in closed:
+        streak += 1
+        day -= timedelta(days=1)
+    return streak
+
+
 # --- Frecuencia de uso ----------------------------------------------------------------------------
 
 

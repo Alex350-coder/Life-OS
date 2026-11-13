@@ -67,6 +67,7 @@ def render(report: IndicatorReport) -> list[str]:
         f"Entregas cumplidas: {d.completed} de {d.due} ({_pct(d.percent)})",
         f"Tareas olvidadas (abiertas con la fecha límite pasada): {d.forgotten}",
         f"Cumplimiento del plan diario: {_pct(a.percent)} en {a.closed_days} cierres",
+        f"Racha de cierres: {report.streak} días seguidos",
         f"Uso: {u.active_days} días activos ({u.days_per_week} por semana)",
         f"Planes aprobados con cambios menores: {p.minor_changes} de {p.approved} "
         f"({_pct(p.percent)}); semanas con plan: {p.proposed}",

@@ -51,6 +51,7 @@ def test_prints_every_indicator_and_the_unmeasured_ones(root: Path, vault: Path)
     assert (code, err) == (0, "")
     assert "Entregas cumplidas: 1 de 1 (100 %)" in out
     assert "Cumplimiento del plan diario: desconocido en 0 cierres" in out
+    assert "Racha de cierres: 0 días seguidos" in out
     assert "sin llamadas a modelos" in out
     assert "Notificaciones: 0 enviadas" in out
     assert "Desviación entre esfuerzo estimado y real" in out

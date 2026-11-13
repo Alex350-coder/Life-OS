@@ -9,6 +9,8 @@ function indicators(overrides: Partial<Indicators> = {}): Indicators {
   return {
     start: "2026-10-06",
     end: "2026-11-02",
+    streak: 2,
+    focus_max_minutes: 240,
     deliveries: { due: 4, completed: 3, forgotten: 1, percent: 75 },
     adherence: { closed_days: 0, answered: 0, percent: null },
     usage: { active_days: 8, days_per_week: 2 },
