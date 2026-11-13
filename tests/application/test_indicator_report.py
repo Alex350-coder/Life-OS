@@ -25,7 +25,7 @@ from tests.planning_samples import HORARIO
 
 pytestmark = pytest.mark.integration
 
-TODAY = date(2026, 11, 13)
+NOW = datetime(2026, 11, 13, 17, tzinfo=UTC)  # 12:00 en Lima
 APPROVED_WEEK = "---\ntipo: semanal\nestado_plan: aprobado\n---\n"
 PROPOSED_WEEK = "---\ntipo: semanal\nestado_plan: propuesto\n---\n"
 
@@ -83,9 +83,7 @@ def test_report_reads_vault_and_logs(
     write_note("Semanal/2026-W46.md", PROPOSED_WEEK)
     write_note("Semanal/2026-W46-r1.md", APPROVED_WEEK)
 
-    report = measure_indicators(
-        vault, JsonlUsageReader(logs), JsonlAuditReader(logs), TODAY, days=28
-    )
+    report = measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW, days=28)
 
     assert (report.deliveries.due, report.deliveries.completed) == (2, 1)
     assert report.deliveries.forgotten == 1
@@ -105,7 +103,7 @@ def test_report_never_writes(vault: FilesystemVault, write_note: WriteNote, logs
     before = sorted(p.value for p in vault.list_notes())
     log_files = sorted(p.read_bytes() for p in logs.iterdir())
 
-    measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), TODAY, days=7)
+    measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW, days=7)
 
     assert sorted(p.value for p in vault.list_notes()) == before
     assert sorted(p.read_bytes() for p in logs.iterdir()) == log_files
@@ -118,16 +116,22 @@ def test_counts_malformed_log_lines(
     target = next(logs.glob("audit-*"))
     target.write_text(target.read_text(encoding="utf-8") + "{no es json\n", encoding="utf-8")
 
-    report = measure_indicators(
-        vault, JsonlUsageReader(logs), JsonlAuditReader(logs), TODAY, days=28
-    )
+    report = measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW, days=28)
 
     assert report.quality.malformed_log_lines == 1
 
 
 def test_missing_horario_is_a_clear_error(vault: FilesystemVault, logs: Path) -> None:
     with pytest.raises(ApplicationError, match=r"falta _sistema/horario.md"):
-        measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), TODAY, days=7)
+        measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW, days=7)
+
+
+def test_naive_now_is_rejected(vault: FilesystemVault, write_note: WriteNote, logs: Path) -> None:
+    write_note("_sistema/horario.md", HORARIO)
+    with pytest.raises(ApplicationError, match="zona horaria"):
+        measure_indicators(
+            vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW.replace(tzinfo=None), days=7
+        )
 
 
 def test_invalid_horario_is_a_clear_error(
@@ -135,4 +139,4 @@ def test_invalid_horario_is_a_clear_error(
 ) -> None:
     write_note("_sistema/horario.md", "sin frontmatter")
     with pytest.raises(ApplicationError, match="no se pudo usar"):
-        measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), TODAY, days=7)
+        measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW, days=7)

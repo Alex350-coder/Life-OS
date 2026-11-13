@@ -6,7 +6,7 @@ no puede medir se listan con su motivo para que el propietario los valore a mano
 
 from collections.abc import Iterator
 from dataclasses import dataclass
-from datetime import UTC, date, datetime, time, timedelta
+from datetime import UTC, datetime, time, timedelta
 
 from lifeos.application.indicators import (
     Acceptance,
@@ -145,11 +145,13 @@ def measure_indicators(
     vault: VaultStore,
     usage_reader: UsageReader,
     audit_reader: AuditReader,
-    today: date,
+    now: datetime,
     *,
     days: int,
 ) -> IndicatorReport:
-    """Indicadores de los últimos `days` días locales hasta `today`, ambos incluidos."""
+    """Indicadores de los últimos `days` días locales (zona de horario.md) hasta hoy incluido."""
+    if now.utcoffset() is None:
+        raise ApplicationError("la hora actual necesita zona horaria")
     try:
         text = _read(vault, HORARIO_NOTE)
         if text is None:
@@ -157,6 +159,7 @@ def measure_indicators(
         zone = parse_horario(text).zone
     except (VaultIOError, HorarioError) as error:
         raise ApplicationError(f"no se pudo usar {HORARIO_NOTE}: {error}") from error
+    today = now.astimezone(zone).date()
     window = Window.ending(today, days=days)
     report = scan(vault)
     usage, audit, malformed = _logs(usage_reader, audit_reader, window)
