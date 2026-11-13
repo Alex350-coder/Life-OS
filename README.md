@@ -82,11 +82,12 @@ uv run lifeos-web                            # escucha solo en 127.0.0.1:8765 (L
   - El puerto se abre en exclusiva. Si ya hay un `lifeos-web` en marcha, el segundo no arranca (`no se pudo abrir 127.0.0.1:8765`).
 - **Vistas** (estilo de `../DESIGN.md`: lienzo oscuro, botones en píldora y el trío pastel):
   - *Hoy:* bloque actual, chat con el Coach (check-in) y cierre, que pide vista previa antes de confirmar.
-  - *Oficina:* escena pixel art animada, generada por código (inspirada en Habblaud). Tú, el Jefe, el Coach y los especialistas aparecen en sus puestos con datos reales del día. La luz sigue la hora y hay una barra de progreso del trabajo. Un clic en un personaje abre su vista. La lista de abajo dice lo mismo en texto. Con `prefers-reduced-motion` se muestra un fotograma fijo.
+  - *Oficina:* escena pixel art animada, generada por código (inspirada en Habblaud). Tú, el Jefe, el Coach y los especialistas aparecen en sus puestos con datos reales del día. La luz sigue la hora y hay una barra de progreso del trabajo. Un clic en un personaje abre su vista. La lista de abajo dice lo mismo en texto. Con `prefers-reduced-motion` se muestra un fotograma fijo. La Fase 9 añade «Mi día», paseos, estaciones y reacciones (ver más abajo).
   - *Semana:* carga por día, tiempo protegido y chat con el Jefe (proponer, aprobar y replanificar).
   - *Tareas:* captura rápida, próximos vencimientos y filtros.
   - *Historial:* la auditoría de este mes y del anterior.
-  - *Agentes:* en solo lectura, con permisos efectivos y uso del mes.
+  - *Agentes:* permisos efectivos, uso del mes y, desde la Fase 8, importación, ciclo de vida y propuestas.
+  - *Indicadores:* utilidad real y carga de avisos (Fase 9).
   - Los chats se guardan en este navegador (almacenamiento local, 100 mensajes como máximo). Se borran con «Borrar conversación».
 - **IA.** Las casillas de IA usan las mismas opciones `--ia` de la CLI y necesitan `NVIDIA_API_KEY`. Admiten 6 peticiones por minuto.
 - **Seguridad (SEC-11).**
@@ -181,6 +182,31 @@ uv run lifeos-agentes lista | desactivar <id> | restaurar <id> --version 1 | exp
 
 El límite del horario es un techo: la carga nunca lo supera. La justificación del plan explica el ajuste. Aprobar valida contra tu límite original.
 
+## Indicadores de utilidad (Fase 9, F9-T03)
+```bash
+uv run lifeos-indicadores            # últimos 28 días
+uv run lifeos-indicadores --dias 7   # de 1 a 90 días
+```
+Solo lectura y sin IA. Mide lo que pide PLAN §13 con tus notas y los logs:
+- entregas cumplidas y tareas olvidadas;
+- cumplimiento del plan diario y racha de cierres;
+- días de uso (solo lo que haces tú, no los rituales);
+- planes aprobados con cambios menores;
+- costo y latencia por ritual;
+- carga de notificaciones.
+
+Lo que no se puede medir se dice con su motivo, y lo desconocido aparece como «desconocido», nunca como 0. Las notas o líneas ilegibles se cuentan y no detienen el informe. La web lo muestra en la pestaña *Indicadores* (`GET /api/indicadores`, 30 s de caché).
+
+## Oficina (Fase 9, F9-T04; ADR-0019)
+Canvas 2D propio, sin dependencias. Además de la escena de la Fase 5:
+- panel «Mi día» con el trabajo hecho, el foco frente a tu límite, la racha de cierres y lo siguiente;
+- en el tiempo libre, el Jefe y el Coach van al sofá y charlan con datos reales del día;
+- decoración por estación según tu zona horaria;
+- reacciones breves a un plan aprobado, un check-in, una propuesta del Coach o un bloque terminado, también anunciadas como texto;
+- botón «Vista sencilla».
+
+Va a 12 fps (8 en equipos modestos), se detiene cuando la pestaña no se ve y muestra un fotograma fijo con `prefers-reduced-motion`.
+
 ## Verificación real del proveedor
 ```bash
 uv run python scripts/smoke_nvidia.py            # perfiles ligero y grande
@@ -202,6 +228,7 @@ Envía un texto fijo sin datos personales y deja un registro en `logs/usage-AAAA
 - `src/lifeos/web/`: API local FastAPI y guardia de acceso (presentación, sin reglas de negocio; Fase 5). Lecturas nuevas en `application/history.py`, `agents_overview.py`, `tasks.upcoming_tasks`, `JefePlanner.semana` y `domain/load.py`.
 - `src/lifeos/service/`: servicio `lifeos-servicio` (bucle, bot de Telegram; presentación, Fase 6). Rituales en `application/rituals.py`, `domain/rituals.py` y `domain/quiet.py`; adaptadores `telegram.py`, `whisper.py`, `json_state.py` y `process_lock.py`.
 - Fase 8: `domain/agent_lifecycle.py`, `areas.py`, `goals.py`, `area_proposals.py` y `specialist_heuristic.py`; `application/agent_registry.py`, `specialists.py` y `proposal_review.py`; `adapters/agent_store.py`; `cli/agents.py` (`lifeos-agentes`); `web/agents_routes.py` y `web/src/views/agents/`.
+- Fase 9: `application/indicators.py` e `indicator_report.py`; `cli/indicators.py` (`lifeos-indicadores`); `web/indicators_routes.py`; `web/src/views/IndicatorsView.tsx`, `MyDayPanel.tsx` y `web/src/office/`.
 - `web/`: frontend React + TypeScript (Vite); `web/dist/` lo sirve el backend y no se versiona.
 - `src/lifeos/bootstrap.py`: raíz de composición; único módulo que conecta adaptadores con casos de uso.
 - `scripts/`: utilidades manuales (verificación real del proveedor) y el servidor de pruebas E2E.
