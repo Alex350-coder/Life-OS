@@ -25,7 +25,8 @@ ROUND_MINUTES = 30
 FLOOR_MINUTES = 60
 FULL_PERCENT = 100
 _SCORES = (("hecha:", 1.0), ("avance:", 0.5), ("no realizada:", 0.0))
-_ENTRY_RE = re.compile(r"^\s*-\s*(?:\d{1,2}:\d{2}\s*·\s*)?(?P<body>.+)$")
+# El cierre escribe "- HH:MM — texto" (CheckInEntry.render); "·" se acepta por notas antiguas.
+_ENTRY_RE = re.compile(r"^\s*-\s*(?:\d{1,2}:\d{2}\s*[·—]\s*)?(?P<body>.+)$")
 
 
 @dataclass(frozen=True, slots=True)
