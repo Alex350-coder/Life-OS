@@ -5,7 +5,7 @@ export const LOW_END_FRAME_MS = 1000 / 8;
 const LOW_END_CORES = 4;
 const LOW_END_MEMORY_GB = 2;
 
-export interface DeviceHints {
+interface DeviceHints {
   hardwareConcurrency?: number;
   deviceMemory?: number;
 }

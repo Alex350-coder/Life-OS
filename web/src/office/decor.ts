@@ -5,7 +5,7 @@ import type { Season } from "./season";
 const WINDOW = { x: 240, y: 20, w: 160, h: 80 };
 const PLANT = { x: 594, y: 140, w: 32, h: 34 };
 
-function rect(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, w: number, h: number) {
+export function rect(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, w: number, h: number) {
   ctx.fillStyle = color;
   ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
 }

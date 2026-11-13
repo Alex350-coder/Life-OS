@@ -3,7 +3,7 @@
 import type { Briefing, Indicators } from "../api/types";
 import { workDone } from "./scene";
 
-export interface MyDay {
+interface MyDay {
   doneMinutes: number;
   workMinutes: number;
   focusMaxMinutes: number | null;

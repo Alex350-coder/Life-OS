@@ -4,7 +4,7 @@
 import type { Briefing } from "../api/types";
 import type { Character } from "./scene";
 
-export interface Line {
+interface Line {
   who: string;
   text: string;
 }
@@ -16,8 +16,8 @@ export interface Pause {
 
 // Ciclo de un paseo en fotogramas (a 12 por segundo, unos 24 s): ir, charlar y volver.
 export const WALK_FRAMES = 36;
-export const STAY_FRAMES = 216;
-export const LINE_FRAMES = 54;
+const STAY_FRAMES = 216;
+const LINE_FRAMES = 54;
 export const CYCLE_FRAMES = WALK_FRAMES * 2 + STAY_FRAMES;
 // Fotograma fijo con movimiento reducido: ya en el sofá, con la primera frase.
 export const STILL_FRAME = WALK_FRAMES;
@@ -57,7 +57,7 @@ export function pauseFor(day: Briefing | null, characters: Character[]): Pause |
   return { walkers, lines: linesFor(day, walkers) };
 }
 
-export interface WalkPhase {
+interface WalkPhase {
   progress: number; // 0 en el puesto, 1 en el sofá
   talking: boolean;
   line: number;

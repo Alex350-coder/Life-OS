@@ -1,6 +1,6 @@
 // Dibujo de la oficina en un canvas 2D: pixel art generado por código (inspirado en Habblaud),
 // sin imágenes externas ni dependencias (CSP de ADR-0013). Paleta de DESIGN.md.
-import { drawSeason, sparkle } from "./decor";
+import { drawSeason, rect, sparkle } from "./decor";
 import { currentLine, walkPhase } from "./pause";
 import type { Reaction } from "./reactions";
 import type { Character, Light, Pose, Scene } from "./scene";
@@ -54,11 +54,6 @@ function deskX(desk: number): number {
 
 function deskY(desk: number): number {
   return DESK_Y + Math.floor(desk / 4) * 70;
-}
-
-function rect(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, w: number, h: number) {
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
 }
 
 function room(ctx: CanvasRenderingContext2D, light: Light, frame: number) {
@@ -227,7 +222,7 @@ export function drawOffice(
   scene: Scene,
   frame: number,
   clock: string,
-  reactions: Reaction[] = [],
+  reactions: Reaction[],
 ): HitBox[] {
   ctx.imageSmoothingEnabled = false;
   room(ctx, scene.light, frame);
