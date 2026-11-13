@@ -4,6 +4,9 @@ Solo lectura y sin reglas (ADR-0006). Sesión, Host y Origin los aplica el middl
 Los valores desconocidos viajan como `null`, nunca como 0.
 """
 
+import time
+from collections.abc import Callable
+from dataclasses import dataclass, field
 from typing import Annotated
 
 from fastapi import APIRouter, Query, Request
@@ -22,6 +25,32 @@ from lifeos.web.runtime import WebRuntime, vault
 
 router = APIRouter(prefix="/api")
 type Json = dict[str, object]
+# Leer la bóveda y hasta 4 meses de logs es caro: cada ventana se reutiliza unos segundos para
+# que una vista que se monta varias veces no repita el trabajo (revisión de seguridad, Fase 9).
+CACHE_TTL_S = 30.0
+
+
+@dataclass(slots=True)
+class ReportCache:
+    clock: Callable[[], float] = time.monotonic
+    entries: dict[int, tuple[float, Json]] = field(default_factory=dict)
+
+    def get(self, days: int) -> Json | None:
+        hit = self.entries.get(days)
+        if hit is None or self.clock() - hit[0] >= CACHE_TTL_S:
+            return None
+        return hit[1]
+
+    def put(self, days: int, data: Json) -> None:
+        self.entries[days] = (self.clock(), data)
+
+
+def _cache(request: Request) -> ReportCache:
+    cache = getattr(request.app.state, "indicators_cache", None)
+    if not isinstance(cache, ReportCache):
+        cache = ReportCache()
+        request.app.state.indicators_cache = cache
+    return cache
 
 
 def _cost(row: RitualCost) -> Json:
@@ -76,6 +105,8 @@ def serialize(report: IndicatorReport) -> Json:
         "quality": {
             "malformed_log_lines": report.quality.malformed_log_lines,
             "unreadable_notes": report.quality.unreadable_notes,
+            "invalid_task_lines": report.quality.invalid_task_lines,
+            "unreadable_closings": report.quality.unreadable_closings,
         },
     }
 
@@ -85,9 +116,15 @@ def indicadores(
     request: Request,
     dias: Annotated[int, Query(ge=1, le=MAX_WINDOW_DAYS)] = DEFAULT_WINDOW_DAYS,
 ) -> JSONResponse:
+    cache = _cache(request)
+    cached = cache.get(dias)
+    if cached is not None:
+        return ok(cached)
     web: WebRuntime = request.app.state.web
     runtime = web.base
     report = measure_indicators(
         vault(runtime), runtime.usage_reader, runtime.audit_reader, runtime.clock.now(), days=dias
     )
-    return ok(serialize(report))
+    data = serialize(report)
+    cache.put(dias, data)
+    return ok(data)

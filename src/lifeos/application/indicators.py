@@ -27,6 +27,10 @@ P95 = 0.95
 MAX_NAME_CHARS = 40
 MINOR_REVISIONS = 1  # aprobado sin revisiones o con una sola: "cambios menores" (PLAN §13)
 SYSTEM_ACTOR = "sistema"
+OWNER_ACTOR = "propietario"
+# Escrituras que solo nacen de algo que hizo el propietario (CLI, web o Telegram): capturar y
+# registrar un check-in. Las del Jefe o los especialistas pueden venir de un ritual programado.
+OWNER_DRIVEN_ACTIONS = frozenset({"crear_captura", "anexar_checkin"})
 RITUAL_ACTION = "ritual"
 _CLOSED = frozenset({TaskStatus.COMPLETADA, TaskStatus.CANCELADA})
 
@@ -77,15 +81,19 @@ class DeliveryStats:
     percent: int | None
 
 
-def deliveries(tasks: Iterable[Task], window: Window, today: date) -> DeliveryStats:
+def deliveries(
+    tasks: Iterable[Task], window: Window, today: date, *, archived: Iterable[Task] = ()
+) -> DeliveryStats:
+    """Una tarea archivada cuenta como entrega, nunca como olvidada: el propietario ya la apartó."""
     due = completed = forgotten = 0
-    for task in tasks:
+    marked = [*((task, False) for task in tasks), *((task, True) for task in archived)]
+    for task, is_archived in marked:
         if task.due is None or task.status is TaskStatus.CANCELADA:
             continue
-        if task.due in window and task.due <= today:
+        if task.due in window:  # la ventana termina hoy
             due += 1
             completed += task.status is TaskStatus.COMPLETADA
-        if task.due < today and task.status not in _CLOSED:
+        if task.due < today and task.status not in _CLOSED and not is_archived:
             forgotten += 1
     return DeliveryStats(due, completed, forgotten, _percent(completed, due))
 
@@ -131,15 +139,17 @@ def _local_day(record: AuditRecord, zone: ZoneInfo) -> date:
     return record.ts.astimezone(zone).date()
 
 
+def _owner_used(record: AuditRecord) -> bool:
+    if record.result is not AuditResult.OK:
+        return False  # intentos, rechazos (p. ej., mensajes de otro chat) y errores no son uso
+    return record.actor == OWNER_ACTOR or record.action in OWNER_DRIVEN_ACTIONS
+
+
 def usage_frequency(
     records: Iterable[AuditRecord], window: Window, zone: ZoneInfo
 ) -> UsageFrequency:
-    """Días con alguna acción terminada del propietario o de sus agentes (no del servicio)."""
-    days = {
-        _local_day(r, zone)
-        for r in records
-        if r.actor != SYSTEM_ACTOR and r.result is not AuditResult.INTENTO
-    }
+    """Días con alguna acción correcta del propietario; los rituales y sus lecturas no cuentan."""
+    days = {_local_day(r, zone) for r in records if _owner_used(r)}
     active = sum(1 for day in days if day in window)
     weeks = len(window.days()) / DAYS_PER_WEEK
     return UsageFrequency(active, round(active / weeks, 1))

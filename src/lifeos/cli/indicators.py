@@ -93,12 +93,15 @@ def render(report: IndicatorReport) -> list[str]:
         *(f"- {name}: {reason}" for name, reason in report.not_measured),
     ]
     q = report.quality
-    if q.malformed_log_lines or q.unreadable_notes:
-        lines += [
-            "",
-            f"Aviso: {q.malformed_log_lines} líneas de log y {q.unreadable_notes} notas o tareas "
-            "no se pudieron leer y no cuentan.",
-        ]
+    problems = [
+        (q.malformed_log_lines, "líneas de log ilegibles"),
+        (q.unreadable_notes, "notas que no se pudieron leer"),
+        (q.invalid_task_lines, "líneas de tareas con formato no válido"),
+        (q.unreadable_closings, "cierres sin respuestas reconocibles"),
+    ]
+    found = [f"{count} {what}" for count, what in problems if count]
+    if found:
+        lines += ["", "Aviso: no cuentan " + "; ".join(found) + "."]
     return [printable(line) for line in lines]
 
 

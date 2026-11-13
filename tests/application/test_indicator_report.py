@@ -3,7 +3,7 @@
 Datos inventados y aislados en `tmp_path`: nunca datos del propietario.
 """
 
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -19,6 +19,7 @@ from lifeos.adapters.jsonl_logs import (
 from lifeos.application.indicator_report import NOT_MEASURED, measure_indicators
 from lifeos.application.tasks import ApplicationError
 from lifeos.ports.logs import AuditRecord, AuditResult, CostStatus, UsageOutcome, UsageRecord
+from lifeos.ports.vault import Snapshot, VaultIOError, VaultPath
 from tests.conftest import WriteNote
 from tests.daily_builders import daily_text
 from tests.planning_samples import HORARIO
@@ -63,7 +64,7 @@ def logs(tmp_path: Path) -> Path:
     audit.append(_audit(datetime(2026, 11, 10, 15, tzinfo=UTC), "coach", "anexar_checkin", "x"))
     audit.append(_audit(datetime(2026, 11, 11, 12, tzinfo=UTC), "sistema", "ritual", "briefing:x"))
     # Registro del mes anterior dentro de la ventana de 28 días.
-    audit.append(_audit(datetime(2026, 10, 20, 15, tzinfo=UTC), "jefe", "publicar_plan", "y"))
+    audit.append(_audit(datetime(2026, 10, 20, 15, tzinfo=UTC), "propietario", "cierre", "y"))
     return path
 
 
@@ -141,3 +142,72 @@ def test_invalid_horario_is_a_clear_error(
     write_note("_sistema/horario.md", "sin frontmatter")
     with pytest.raises(ApplicationError, match="no se pudo usar"):
         measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW, days=7)
+
+
+class _FlakyVault:
+    """Bóveda que falla al leer una nota concreta (p. ej., un archivo de OneDrive sin bajar)."""
+
+    def __init__(self, inner: FilesystemVault, broken: str) -> None:
+        self._inner = inner
+        self._broken = broken
+
+    def __getattr__(self, name: str) -> object:
+        return getattr(self._inner, name)
+
+    def read(self, path: VaultPath) -> Snapshot:
+        if path.value == self._broken:
+            raise VaultIOError("archivo no disponible")
+        return self._inner.read(path)
+
+
+def _closing(day: date) -> str:
+    return daily_text(day, closing=("- 21:00 — hecha: t-aaaaaa",))
+
+
+def test_streak_continues_before_the_window(
+    vault: FilesystemVault, write_note: WriteNote, logs: Path
+) -> None:
+    write_note("_sistema/horario.md", HORARIO)
+    for offset in range(10):  # del 4 al 13 de noviembre, todos cerrados
+        day = date(2026, 11, 13) - timedelta(days=offset)
+        write_note(f"Diario/{day.isoformat()}.md", _closing(day))
+
+    report = measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW, days=3)
+
+    assert report.streak == 10
+    assert report.adherence.closed_days == 3  # el cumplimiento sí respeta la ventana
+
+
+def test_an_unreadable_note_is_counted_not_fatal(
+    vault: FilesystemVault, write_note: WriteNote, logs: Path
+) -> None:
+    write_note("_sistema/horario.md", HORARIO)
+    write_note("Diario/2026-11-12.md", _closing(date(2026, 11, 12)))
+    write_note("Diario/2026-11-13.md", _closing(date(2026, 11, 13)))
+    flaky = _FlakyVault(vault, "Diario/2026-11-12.md")
+
+    report = measure_indicators(
+        flaky,  # type: ignore[arg-type]
+        JsonlUsageReader(logs),
+        JsonlAuditReader(logs),
+        NOW,
+        days=7,
+    )
+
+    assert report.quality.unreadable_notes == 1
+    assert report.adherence.closed_days == 1
+    assert report.streak == 1  # el día ilegible corta la racha: no se supone cerrado
+
+
+def test_a_closing_without_known_answers_is_reported(
+    vault: FilesystemVault, write_note: WriteNote, logs: Path
+) -> None:
+    write_note("_sistema/horario.md", HORARIO)
+    write_note("Diario/2026-11-13.md", daily_text(date(2026, 11, 13), closing=("- texto libre",)))
+    write_note("07-Cotidiano/t.md", "- [ ] tarea [esfuerzo:: mucho]\n")
+
+    report = measure_indicators(vault, JsonlUsageReader(logs), JsonlAuditReader(logs), NOW, days=7)
+
+    assert report.quality.unreadable_closings == 1
+    assert report.quality.invalid_task_lines == 1
+    assert report.quality.unreadable_notes == 0

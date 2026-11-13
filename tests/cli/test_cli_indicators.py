@@ -75,3 +75,11 @@ def test_without_horario_is_refused(root: Path, vault: Path) -> None:
     code, out, err = _run(root, vault)
     assert (code, out) == (1, "")
     assert "falta _sistema/horario.md" in err
+
+
+def test_warns_about_data_that_does_not_count(root: Path, vault: Path) -> None:
+    bad = vault / "07-Cotidiano" / "mal.md"
+    bad.write_text("- [ ] tarea [esfuerzo:: mucho]\n", encoding="utf-8")
+    code, out, _ = _run(root, vault)
+    assert code == 0
+    assert "Aviso: no cuentan 1 líneas de tareas con formato no válido." in out

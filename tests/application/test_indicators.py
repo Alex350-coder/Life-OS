@@ -113,6 +113,14 @@ class TestDeliveries:
         stats = deliveries([_task("sin fecha", Checkbox.PENDING, None)], WINDOW, TODAY)
         assert (stats.due, stats.percent) == (0, None)
 
+    def test_archived_tasks_count_as_deliveries_but_never_as_forgotten(self) -> None:
+        archived = [
+            _task("archivada hecha", Checkbox.DONE, date(2026, 11, 10)),
+            _task("archivada abierta", Checkbox.PENDING, date(2026, 11, 11)),
+        ]
+        stats = deliveries([], WINDOW, TODAY, archived=archived)
+        assert (stats.due, stats.completed, stats.forgotten) == (2, 1, 0)
+
     def test_a_task_due_today_still_open_is_not_forgotten(self) -> None:
         stats = deliveries([_task("hoy", Checkbox.PENDING, TODAY)], WINDOW, TODAY)
         assert (stats.due, stats.completed, stats.forgotten) == (1, 0, 0)
@@ -129,21 +137,36 @@ class TestPlanAdherence:
 
 
 class TestUsageFrequency:
-    def test_counts_distinct_local_days_without_system_actor(self) -> None:
+    def test_counts_local_days_with_owner_actions_only(self) -> None:
         records = [
-            _audit(datetime(2026, 11, 10, 14, tzinfo=UTC)),
-            _audit(datetime(2026, 11, 10, 20, tzinfo=UTC), actor="coach"),
+            _audit(datetime(2026, 11, 10, 14, tzinfo=UTC), actor="propietario", action="cierre"),
+            _audit(datetime(2026, 11, 10, 20, tzinfo=UTC), actor="coach", action="anexar_checkin"),
             # 03:00 UTC del 12 son las 22:00 del 11 en Lima.
-            _audit(datetime(2026, 11, 12, 3, tzinfo=UTC), actor="propietario"),
-            _audit(datetime(2026, 11, 12, 15, tzinfo=UTC), actor="sistema", action="ritual"),
-            _audit(datetime(2026, 10, 1, 15, tzinfo=UTC)),  # fuera de la ventana
+            _audit(datetime(2026, 11, 12, 3, tzinfo=UTC), actor="jefe", action="crear_captura"),
+            _audit(datetime(2026, 10, 1, 15, tzinfo=UTC), actor="propietario"),  # fuera
         ]
         result = usage_frequency(records, WINDOW, LIMA)
         assert result.active_days == 2
         assert result.days_per_week == 1.0  # 2 días en 14 días
 
-    def test_attempts_without_result_are_not_usage(self) -> None:
-        record = _audit(datetime(2026, 11, 10, 14, tzinfo=UTC), result=AuditResult.INTENTO)
+    @pytest.mark.parametrize(
+        ("actor", "action", "result"),
+        [
+            ("sistema", "ritual", AuditResult.OK),  # un aviso programado
+            ("coach", "leer_nota", AuditResult.OK),  # el briefing de un ritual lee notas
+            ("jefe", "publicar_plan", AuditResult.OK),  # la propuesta semanal programada
+            ("universidad", "proponer_al_jefe", AuditResult.OK),
+            ("telegram", "mensaje_ajeno", AuditResult.RECHAZADO),  # un desconocido escribe
+            ("propietario", "cierre", AuditResult.INTENTO),
+            ("propietario", "cierre", AuditResult.ERROR),
+        ],
+    )
+    def test_activity_not_driven_by_the_owner_is_not_usage(
+        self, actor: str, action: str, result: AuditResult
+    ) -> None:
+        record = _audit(
+            datetime(2026, 11, 10, 14, tzinfo=UTC), actor=actor, action=action, result=result
+        )
         assert usage_frequency([record], WINDOW, LIMA).active_days == 0
 
 
