@@ -31,7 +31,15 @@ CAPTURE = {"texto": "Idea de prueba"}
 
 
 @pytest.mark.parametrize(
-    "path", ["/api/session", "/api/hoy", "/api/semana", "/api/tareas", "/api/historial"]
+    "path",
+    [
+        "/api/session",
+        "/api/hoy",
+        "/api/semana",
+        "/api/tareas",
+        "/api/historial",
+        "/api/indicadores",
+    ],
 )
 def test_api_without_session_is_401(web: Web, path: str) -> None:
     response = web.client.get(path)
