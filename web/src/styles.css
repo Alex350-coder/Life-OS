@@ -195,3 +195,9 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
 .stat dt { color: var(--mist); font-size: 13px; }
 .stat dd { margin: 4px 0 0; }
 .stat dd strong { font-size: 22px; color: var(--snow); }
+
+/* --- Oficina: Mi día y eventos (F9-T04) ------------------------------------------------------ */
+.my-day { margin-top: var(--space); }
+.my-day-progress { display: grid; gap: 6px; }
+.my-day progress { width: 100%; height: 10px; accent-color: #99d2ec; }
+.office-event { min-height: 1.4em; color: var(--amber); margin: 8px 0 0; }
