@@ -158,11 +158,39 @@ test("la oficina dibuja la escena, se describe en texto y abre las vistas", asyn
   const list = page.getByRole("list", { name: "Quién está en la oficina" });
   await expect(list).toContainText("Coach");
   await expect(page.locator("canvas.office-canvas")).toBeVisible();
+  // Fase 9: el panel Mi día cuenta el cierre confirmado en la prueba anterior.
+  const myDay = page.getByRole("region", { name: "Mi día" });
+  await expect(myDay).toContainText("Racha de cierres");
+  await expect(myDay).toContainText("1 día(s)");
   await page.waitForTimeout(400); // unos fotogramas de la animación
   await page.screenshot({ path: "test-results/oficina.png", fullPage: true });
   await expectAccessible(page);
   await list.getByRole("button", { name: /Jefe/ }).click();
   await expect(page.getByRole("tab", { name: "Semana" })).toHaveAttribute("aria-selected", "true");
+  expect(problems).toEqual([]);
+});
+
+test("con movimiento reducido la oficina queda fija y la vista sencilla está a un clic", async ({ page }) => {
+  const problems = failOnDialogsAndCsp(page);
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await page.goto("/#oficina");
+  await expect(page.locator("canvas.office-canvas")).toBeVisible();
+  await page.getByRole("button", { name: "Vista sencilla" }).click();
+  await expect(page.getByRole("tab", { name: "Hoy" })).toHaveAttribute("aria-selected", "true");
+  expect(problems).toEqual([]);
+});
+
+test("los indicadores se calculan con lo que pasó en las pruebas anteriores", async ({ page }) => {
+  const problems = failOnDialogsAndCsp(page);
+  await page.goto("/#indicadores");
+  const view = page.getByRole("region", { name: "Indicadores" });
+  await expect(view).toContainText("Entregas cumplidas");
+  await expect(view).toContainText("Cumplimiento del plan");
+  await expect(view).toContainText("Sin medición automática");
+  await page.getByRole("combobox").selectOption("7");
+  await expect(view).toContainText("Uso");
+  await page.screenshot({ path: "test-results/indicadores.png", fullPage: true });
+  await expectAccessible(page);
   expect(problems).toEqual([]);
 });
 
