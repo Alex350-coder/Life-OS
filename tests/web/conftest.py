@@ -67,7 +67,13 @@ class Web:
         path.write_text(text, encoding="utf-8")
 
 
-def build_web(tmp_path: Path, *, now: datetime = NOW, dist: Path | None = None) -> Web:
+def build_web(
+    tmp_path: Path,
+    *,
+    now: datetime = NOW,
+    dist: Path | None = None,
+    extra_env: dict[str, str] | None = None,
+) -> Web:
     root = tmp_path / "project"
     shutil.copytree(PROJECT / "config", root / "config")
     vault = tmp_path / "vault"
@@ -76,7 +82,12 @@ def build_web(tmp_path: Path, *, now: datetime = NOW, dist: Path | None = None) 
     (vault / "01-Universidad").mkdir()
     (vault / "01-Universidad" / "redes.md").write_text(TASKS, encoding="utf-8")
     settings = Settings.from_env(
-        root, {"LIFEOS_VAULT_PATH": str(vault), "LIFEOS_LOGS_DIR": str(root / "logs")}
+        root,
+        {
+            "LIFEOS_VAULT_PATH": str(vault),
+            "LIFEOS_LOGS_DIR": str(root / "logs"),
+            **(extra_env or {}),
+        },
     )
     clock = FakeClock(now)
     monotonic = Monotonic()
