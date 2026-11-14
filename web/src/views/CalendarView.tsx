@@ -19,7 +19,7 @@ function GrantRow({ item }: { item: CalendarGrant }) {
   return (
     <li>
       <strong>{GRANT_LABELS[item.grant]}:</strong> {state}
-      {item.problem !== null && <span className="banner banner-warn"> {item.problem}</span>}
+      {item.problem !== null && <p className="banner banner-warn">Problema: {item.problem}</p>}
     </li>
   );
 }
@@ -36,6 +36,9 @@ function Status({ status }: { status: CalendarStatus }) {
   const readConnected = status.grants.some((g) => g.grant === "lectura" && g.connected);
   return (
     <>
+      {status.problem !== null && (
+        <p className="banner banner-warn">Problema de configuración: {status.problem}</p>
+      )}
       <ul>
         {status.grants.map((item) => (
           <GrantRow key={item.grant} item={item} />
@@ -64,7 +67,7 @@ function Availability({ data }: { data: CalendarAvailability }) {
       ) : (
         <ul>
           {data.busy.map((item) => (
-            <li key={item.start}>
+            <li key={`${item.source}|${item.start}|${item.end}`}>
               {item.day} {item.span} · {item.source} · confianza {item.confidence}
             </li>
           ))}
@@ -80,12 +83,22 @@ function Availability({ data }: { data: CalendarAvailability }) {
       {data.plan_path !== null && data.clashes.length === 0 && (
         <p>Ningún bloque de trabajo choca con el calendario.</p>
       )}
-      {data.clashes.map(({ block, busy }) => (
-        <p key={block.start} role="alert" className="banner banner-warn">
-          Choque: «{block.title}» {block.day} {block.span} con {busy.source} (confianza{" "}
-          {busy.confidence}). Replanifica la semana.
-        </p>
-      ))}
+      {data.clashes.length > 0 && (
+        <div role="alert" className="banner banner-warn">
+          <p>
+            {data.clashes.length === 1 ? "1 choque" : `${data.clashes.length} choques`} con el
+            calendario. Replanifica la semana.
+          </p>
+          <ul>
+            {data.clashes.map(({ block, busy }) => (
+              <li key={`${block.start}|${busy.source}|${busy.start}`}>
+                Choque: «{block.title}» {block.day} {block.span} con {busy.source} (confianza{" "}
+                {busy.confidence})
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
     </section>
   );
 }
@@ -134,8 +147,9 @@ export function CalendarView() {
           </label>
           <p id="calendar-week-format" className={isValid ? "muted small" : "banner banner-warn"}>
             Formato AAAA-Wnn, p. ej., 2026-W45.
+            {!isValid && " Corrígelo para ver la disponibilidad de esa semana."}
           </p>
-          <AvailabilityLoader week={isValid ? week : ""} />
+          {isValid && <AvailabilityLoader week={week} />}
         </>
       )}
     </div>

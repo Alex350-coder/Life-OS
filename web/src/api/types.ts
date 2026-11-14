@@ -328,6 +328,7 @@ export interface CalendarStatus {
   configured: boolean;
   grants: CalendarGrant[];
   can_read: boolean;
+  problem: string | null; // configuración de Google rechazada, si la hay
 }
 
 export interface BusyInterval {
