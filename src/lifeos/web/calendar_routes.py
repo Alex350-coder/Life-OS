@@ -26,6 +26,7 @@ from lifeos.domain.external import ExternalBusy
 from lifeos.domain.text import printable
 from lifeos.domain.weeks import IsoWeek
 from lifeos.ports.calendar import GrantStatus
+from lifeos.ports.config import ConfigRejectedError
 from lifeos.web import serialize
 from lifeos.web.errors import ok
 from lifeos.web.runtime import WebRuntime, jefe
@@ -35,6 +36,7 @@ type Json = dict[str, object]
 # Cada lectura de la disponibilidad es una llamada a Google: una vista que se monta varias
 # veces reutiliza la respuesta unos segundos, como los indicadores.
 CACHE_TTL_S = 30.0
+MAX_CACHED_WEEKS = 16  # acota la memoria: cada semana distinta es una entrada
 WEEK_CHARS = 10  # AAAA-Wnn
 
 
@@ -50,7 +52,10 @@ class AvailabilityCache:
         return hit[1]
 
     def put(self, key: str, data: Json) -> None:
-        self.entries[key] = (self.clock(), data)
+        now = self.clock()
+        fresh = {k: v for k, v in self.entries.items() if now - v[0] < CACHE_TTL_S and k != key}
+        newest = sorted(fresh.items(), key=lambda item: item[1][0])[-(MAX_CACHED_WEEKS - 1) :]
+        self.entries = {**dict(newest), key: (now, data)}
 
 
 def _cache(request: Request) -> AvailabilityCache:
@@ -108,18 +113,18 @@ def serialize_availability(view: ExternalView) -> Json:
 @router.get("")
 def estado(request: Request) -> JSONResponse:
     web: WebRuntime = request.app.state.web
-    if not web.settings.environ.get(GOOGLE_CLIENT_ID_ENV):
-        return ok({"configured": False, "grants": [], "can_read": False})
-    statuses = calendar_access(web.settings).status()
+    if not (web.settings.environ.get(GOOGLE_CLIENT_ID_ENV) or "").strip():
+        return ok({"configured": False, "grants": [], "can_read": False, "problem": None})
     tools = web.base.calendar
-    return ok(
-        {
-            "configured": True,
-            "grants": [_grant(s) for s in statuses],
-            # Los permisos se leen al arrancar: uno conectado después pide reiniciar lifeos-web.
-            "can_read": tools is not None and tools.can_read,
-        }
-    )
+    # Los permisos se leen al arrancar: uno conectado después pide reiniciar lifeos-web.
+    can_read = tools is not None and tools.can_read
+    try:
+        statuses = calendar_access(web.settings).status()
+    except ConfigRejectedError as error:  # cliente mal configurado: se muestra, no es un 503
+        problem = printable(str(error))
+        return ok({"configured": True, "grants": [], "can_read": can_read, "problem": problem})
+    grants = [_grant(s) for s in statuses]
+    return ok({"configured": True, "grants": grants, "can_read": can_read, "problem": None})
 
 
 @router.get("/disponibilidad")

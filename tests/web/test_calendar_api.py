@@ -12,6 +12,7 @@ import pytest
 
 from lifeos.adapters.google_tokens import Grant, StoredToken, TokenStore
 from lifeos.adapters.secrets import Secret
+from lifeos.web.calendar_routes import CACHE_TTL_S, MAX_CACHED_WEEKS, AvailabilityCache
 from tests.fake_google import READ, FakeGoogle, fake_google  # noqa: F401 - fixture
 from tests.web.conftest import ORIGIN, Web, build_web
 
@@ -48,7 +49,7 @@ def test_status_without_client_id_says_not_configured(web: Web) -> None:
 
     data = web.client.get("/api/calendario").json()["data"]
 
-    assert data == {"configured": False, "grants": [], "can_read": False}
+    assert data == {"configured": False, "grants": [], "can_read": False, "problem": None}
 
 
 def test_status_lists_each_grant_without_calling_google(
@@ -126,3 +127,46 @@ def test_web_cannot_write_to_google(web: Web, method: str) -> None:
     for path in ("/api/calendario", "/api/calendario/publicar", "/api/calendario/conectar"):
         response = web.client.request(method, path, headers=headers)
         assert response.status_code in (404, 405), (method, path)
+
+
+def test_blank_client_id_counts_as_not_configured(tmp_path: Path) -> None:
+    harness = build_web(tmp_path, extra_env={"GOOGLE_CLIENT_ID": "   "})
+    with harness.client:
+        harness.login()
+        data = harness.client.get("/api/calendario").json()["data"]
+    assert data["configured"] is False
+
+
+def test_rejected_client_config_is_shown_as_a_problem(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    from lifeos.ports.config import ConfigRejectedError
+    from lifeos.web import calendar_routes
+
+    def rejected(_settings: object) -> object:
+        raise ConfigRejectedError("GOOGLE_CLIENT_ID", ("formato no válido",))
+
+    monkeypatch.setattr(calendar_routes, "calendar_access", rejected)
+    harness = build_web(tmp_path, extra_env={"GOOGLE_CLIENT_ID": CLIENT_ID})
+    with harness.client:
+        harness.login()
+        response = harness.client.get("/api/calendario")
+
+    assert response.status_code == 200
+    data = response.json()["data"]
+    assert data["configured"] is True
+    assert "formato no válido" in data["problem"]
+
+
+def test_cache_expires_and_keeps_at_most_a_few_weeks() -> None:
+    now = [0.0]
+    cache = AvailabilityCache(clock=lambda: now[0])
+    for n in range(MAX_CACHED_WEEKS + 5):
+        cache.put(f"2026-W{n:02d}", {"n": n})
+    assert len(cache.entries) == MAX_CACHED_WEEKS
+    assert cache.get("2026-W00") is None  # la más antigua salió
+    assert cache.get(f"2026-W{MAX_CACHED_WEEKS + 4:02d}") == {"n": MAX_CACHED_WEEKS + 4}
+    now[0] = CACHE_TTL_S
+    assert cache.get(f"2026-W{MAX_CACHED_WEEKS + 4:02d}") is None
+    cache.put("2026-W50", {})
+    assert list(cache.entries) == ["2026-W50"]  # las caducadas se limpian

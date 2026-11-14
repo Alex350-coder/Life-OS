@@ -308,4 +308,3 @@ def without_rejected(
     kept = [item for item in items if item_signature(item) not in rejected]
     renumbered = tuple(replace(item, key=f"p{n}") for n, item in enumerate(kept, start=1))
     return renumbered, len(items) - len(kept)
-
