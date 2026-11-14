@@ -265,3 +265,28 @@ def test_without_rejected_drops_matches_and_renumbers() -> None:
 
     assert dropped == 1
     assert [(i.key, i.title) for i in kept] == [("p1", "A"), ("p2", "C")]
+
+
+def test_new_task_signature_ignores_due_date_and_effort_on_purpose() -> None:
+    """Decisión de la Fase 10: rechazar «Leer» rechaza la idea esa semana, no una fecha o un
+    esfuerzo concretos; si no, el especialista podría insistir moviendo solo la fecha."""
+    first = ProposalItem(
+        "p1",
+        ProposalKind.NUEVA_TAREA,
+        Priority.MEDIA,
+        "meta",
+        title="Leer",
+        effort=Effort.parse("30m"),
+        due=date(2026, 11, 6),
+    )
+    moved = ProposalItem(
+        "p2",
+        ProposalKind.NUEVA_TAREA,
+        Priority.ALTA,
+        "meta",
+        title="Leer",
+        effort=Effort.parse("2h"),
+        due=date(2026, 11, 20),
+    )
+
+    assert item_signature(first) == item_signature(moved)
