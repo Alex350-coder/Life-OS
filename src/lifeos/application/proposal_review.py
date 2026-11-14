@@ -5,7 +5,9 @@ un cambio de prioridad edita esa tarea (abierta y del área de la propuesta) y u
 se crea en `<carpeta del área>/tareas.md`. Después se marca el elemento en la nota, con control
 de versión. El Jefe planifica con las tareas tal como quedan: solo lo aceptado le llega.
 
-Si el cambio se aplica pero la marca no se puede guardar, el error lo dice para no repetirlo.
+Si el cambio se aplica pero la marca no se puede guardar, el error lo dice. Repetir la
+aceptación es seguro: la tarea nueva lleva su origen (`[propuesta:: …]`), así que se reconoce
+y solo se marca la propuesta (DT-29). Un cambio de prioridad repetido deja el mismo valor.
 """
 
 import uuid
@@ -19,6 +21,7 @@ from lifeos.application.tasks import (
     ApplicationError,
     TaskNotFoundError,
     create_task,
+    find_by_origin,
     find_task,
     update_task,
 )
@@ -67,6 +70,18 @@ class ReviewItem:
 class PendingReview:
     items: tuple[ReviewItem, ...]
     skipped: tuple[str, ...]  # notas que no se pudieron leer o con nombre no válido, con motivo
+
+
+@dataclass(frozen=True, slots=True)
+class _Applied:
+    task_id: TaskId | None
+    already: bool  # la tarea ya existía por una aceptación interrumpida
+
+
+def _ok_reason(applied: _Applied) -> str | None:
+    if applied.task_id is None:
+        return None
+    return f"{applied.task_id} ya_aplicada" if applied.already else str(applied.task_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -170,11 +185,17 @@ class ProposalReview:
             raise ValidationError("propuesta", ref.key, f"ya está {item.status}")
         return snapshot.text, snapshot.version, item, proposal_area(snapshot.text)
 
-    def _apply(self, item: ProposalItem, area: Area | None) -> TaskId | None:
+    def _apply(self, ref: ProposalRef, item: ProposalItem, area: Area | None) -> _Applied:
         if area is None:
             raise ProposalReviewError("la nota no declara un área con especialista válida")
         if item.kind is ProposalKind.PRIORIDAD:
-            return self._change_priority(item, area)
+            return _Applied(self._change_priority(item, area), already=False)
+        existing = find_by_origin(self._vault, str(ref))
+        if existing is not None:  # aplicada antes de una caída: solo falta marcarla (DT-29)
+            return _Applied(existing.task.id, already=True)
+        return _Applied(self._create(ref, item, area), already=False)
+
+    def _create(self, ref: ProposalRef, item: ProposalItem, area: Area) -> TaskId | None:
         if item.title is None or item.effort is None:  # el dominio ya lo impide
             raise ProposalReviewError("la tarea nueva está incompleta")
         if item.due is not None and item.due < self._clock.now().date():
@@ -191,6 +212,7 @@ class ProposalReview:
             due=item.due,
             priority=item.priority,
             protected=self._protected,
+            origin=str(ref),
         )
         return created.task.id
 
@@ -226,10 +248,11 @@ class ProposalReview:
         text, version, item, area = self._load(ref)
         self._log(correlation, action, ref, AuditResult.INTENTO)
         try:
-            task_id = self._apply(item, area)
+            applied = self._apply(ref, item, area)
         except LifeOSError as error:
             self._log(correlation, action, ref, AuditResult.RECHAZADO, type(error).__name__)
             raise
+        task_id = applied.task_id
         try:
             self._mark(ref, text, version, ProposalStatus.ACEPTADA)
         except LifeOSError as error:
@@ -237,7 +260,7 @@ class ProposalReview:
             raise ProposalAppliedButUnmarkedError(
                 f"se aplicó {ref} pero no se pudo marcar como aceptada: márcala a mano"
             ) from error
-        self._log(correlation, action, ref, AuditResult.OK, str(task_id) if task_id else None)
+        self._log(correlation, action, ref, AuditResult.OK, _ok_reason(applied))
         return AcceptResult(ref, task_id)
 
     def reject(self, ref: ProposalRef) -> None:

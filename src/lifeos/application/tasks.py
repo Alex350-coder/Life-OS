@@ -5,6 +5,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import date, timedelta
 
+from lifeos.domain.area_proposals import ProposalRef
 from lifeos.domain.areas import PROPOSALS_ROOT as PROPOSALS_FOLDER
 from lifeos.domain.errors import LifeOSError, ValidationError
 from lifeos.domain.ids import TaskId, new_unique_task_id
@@ -51,6 +52,7 @@ NOTE_SUFFIX = ".md"
 _RAW_ID_RE = re.compile(r"\[id::\s*(t-[0-9a-z]{6})\s*\]")
 # Ventana de "tareas próximas" (F5-T02), en días desde hoy.
 MAX_UPCOMING_DAYS = 60
+ORIGIN_FIELD = "propuesta"  # campo inerte: la propuesta que creó la tarea (DT-29)
 CLOSED_STATUSES = frozenset({TaskStatus.COMPLETADA, TaskStatus.CANCELADA})
 
 
@@ -260,6 +262,7 @@ def _render_new_task(
     due: date | None,
     scheduled: date | None,
     priority: Priority,
+    origin: str | None = None,
 ) -> str:
     parts = [f"- [ ] {title}", f"[id:: {task_id}]", f"[area:: {area}]"]
     parts.append(f"[esfuerzo:: {effort.render()}]")
@@ -269,7 +272,27 @@ def _render_new_task(
         parts.append(f"{DUE} {due.isoformat()}")
     if scheduled is not None:
         parts.append(f"{SCHEDULED} {scheduled.isoformat()}")
+    if origin is not None:
+        parts.append(f"[{ORIGIN_FIELD}:: {origin}]")
     return " ".join(parts)
+
+
+def _checked_origin(origin: str | None) -> tuple[tuple[str, str], ...]:
+    """Campos extra esperados en la línea nueva. El origen debe ser una referencia de propuesta
+    exacta (`AAAA-Wnn/<nota>/p<n>`): así no puede inyectar otros campos ni estados."""
+    if origin is None:
+        return ()
+    if str(ProposalRef.parse(origin)) != origin:
+        raise ValidationError(ORIGIN_FIELD, origin, "formato esperado AAAA-Wnn/<nota>/p<n>")
+    return ((ORIGIN_FIELD, origin),)
+
+
+def find_by_origin(vault: VaultStore, origin: str) -> LocatedTask | None:
+    """Tarea creada al aceptar la propuesta `origin`, activa o archivada (DT-29)."""
+    for task in scan(vault).tasks:
+        if (ORIGIN_FIELD, origin) in task.line.extra_fields:
+            return task
+    return None
 
 
 def create_task(
@@ -283,15 +306,22 @@ def create_task(
     scheduled: date | None = None,
     priority: Priority = Priority.MEDIA,
     protected: tuple[VaultPath, ...] = DEFAULT_PROTECTED_ROOTS,
+    origin: str | None = None,
 ) -> LocatedTask:
-    """Crea una tarea con id único al final de la nota indicada."""
+    """Crea una tarea con id único al final de la nota indicada. `origin` es la propuesta que
+    la crea, si la hay: queda en la línea para que repetir la aceptación no la duplique."""
     check_writable(path, protected)
+    expected_extra = _checked_origin(origin)
     task_id = new_unique_task_id(_taken_ids(vault))
     line = _render_new_task(
-        title, task_id, area, effort, due=due, scheduled=scheduled, priority=priority
+        title, task_id, area, effort, due=due, scheduled=scheduled, priority=priority, origin=origin
     )
     parsed = parse_task_line(line)
-    if parsed is None or parsed.task.title != " ".join(title.split()) or parsed.extra_fields:
+    if (
+        parsed is None
+        or parsed.task.title != " ".join(title.split())
+        or parsed.extra_fields != expected_extra
+    ):
         raise ValidationError("título", title, "no puede contener campos, fechas ni saltos")
     index = append_to_note(vault, path, line)
     return LocatedTask(path, index, parsed)
