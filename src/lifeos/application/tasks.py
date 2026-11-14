@@ -288,11 +288,39 @@ def _checked_origin(origin: str | None) -> tuple[tuple[str, str], ...]:
 
 
 def find_by_origin(vault: VaultStore, origin: str) -> LocatedTask | None:
-    """Tarea creada al aceptar la propuesta `origin`, activa o archivada (DT-29)."""
-    for task in scan(vault).tasks:
-        if (ORIGIN_FIELD, origin) in task.line.extra_fields:
-            return task
+    """Tarea creada al aceptar la propuesta `origin`, activa o archivada (DT-29).
+
+    Falla cerrado: si alguna nota no se puede leer, o la línea con ese origen tiene errores de
+    formato, no se puede saber si ya se aplicó, y crear otra tarea podría duplicarla."""
+    report = scan(vault)
+    found = [t for t in report.tasks if (ORIGIN_FIELD, origin) in t.line.extra_fields]
+    if len(found) > 1:
+        places = ", ".join(f"{t.path}:{t.index + 1}" for t in found)
+        raise ApplicationError(f"la propuesta {origin} ya creó varias tareas ({places})")
+    if found:
+        return found[0]
+    _check_unverifiable(vault, report.problems, origin)
     return None
+
+
+def _check_unverifiable(vault: VaultStore, problems: tuple[NoteProblem, ...], origin: str) -> None:
+    unreadable = sorted({str(p.path) for p in problems if p.line_index is None})
+    if unreadable:
+        raise ApplicationError(
+            f"no se puede comprobar si la propuesta {origin} ya se aplicó: no se pudieron "
+            f"leer {', '.join(unreadable)}; repite cuando se puedan leer"
+        )
+    marker = f"[{ORIGIN_FIELD}:: {origin}]"
+    for path in sorted({p.path for p in problems}, key=lambda p: p.value):
+        try:
+            text = vault.read(path).text
+        except (VaultIOError, NoteNotFoundError) as error:
+            raise ApplicationError(f"no se pudo releer {path}: {type(error).__name__}") from None
+        if marker in text:
+            raise ApplicationError(
+                f"la tarea de la propuesta {origin} en {path} tiene errores de formato; "
+                "corrígela antes de aceptar"
+            )
 
 
 def create_task(

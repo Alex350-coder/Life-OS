@@ -11,7 +11,7 @@ a una línea inerte sin corchetes (SEC-10): un motivo no puede inyectar campos n
 """  # noqa: E501
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 
@@ -306,19 +306,6 @@ def without_rejected(
 ) -> tuple[tuple[ProposalItem, ...], int]:
     """Quita lo ya rechazado y renumera las claves (p1, p2…). Devuelve cuántos quitó."""
     kept = [item for item in items if item_signature(item) not in rejected]
-    renumbered = tuple(_with_key(item, f"p{n}") for n, item in enumerate(kept, start=1))
+    renumbered = tuple(replace(item, key=f"p{n}") for n, item in enumerate(kept, start=1))
     return renumbered, len(items) - len(kept)
 
-
-def _with_key(item: ProposalItem, key: str) -> ProposalItem:
-    return ProposalItem(
-        key,
-        item.kind,
-        item.priority,
-        item.reason,
-        task_id=item.task_id,
-        title=item.title,
-        effort=item.effort,
-        due=item.due,
-        status=item.status,
-    )

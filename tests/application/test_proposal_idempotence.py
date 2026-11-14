@@ -8,7 +8,13 @@ import pytest
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
 from lifeos.application.proposal_review import ProposalAppliedButUnmarkedError, ProposalReview
-from lifeos.application.tasks import TaskQuery, create_task, find_by_origin, query_tasks
+from lifeos.application.tasks import (
+    ApplicationError,
+    TaskQuery,
+    create_task,
+    find_by_origin,
+    query_tasks,
+)
 from lifeos.domain.area_proposals import (
     AreaProposal,
     ProposalItem,
@@ -131,3 +137,54 @@ def test_create_task_rejects_a_malformed_origin(vault: FilesystemVault) -> None:
             effort=Effort.parse("1h"),
             origin="2026-W44/universidad/p1] [estado:: completada",
         )
+
+
+def test_unreadable_note_blocks_the_accept_instead_of_duplicating(
+    vault: FilesystemVault, write_note: WriteNote, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    _seed(write_note)
+    write_note("01-Universidad/tareas.md", "- [ ] Otra [id:: t-abc235] [area:: universidad]\n")
+    original = vault.read
+
+    def flaky(path: VaultPath) -> Snapshot:
+        if path.value == "01-Universidad/tareas.md":
+            raise VaultIOError("bloqueada por la sincronización")
+        return original(path)
+
+    monkeypatch.setattr(vault, "read", flaky)
+    audit = MemoryAuditLog()
+
+    with pytest.raises(ApplicationError, match=r"no se pudieron leer 01-Universidad/tareas.md"):
+        ProposalReview(vault, audit, FakeClock()).accept(REF)
+
+    monkeypatch.undo()
+    assert _titles(vault) == ["Otra"]  # no se creó nada
+    assert audit.records[-1].result is AuditResult.RECHAZADO
+
+
+def test_malformed_line_with_the_origin_blocks_the_accept(
+    vault: FilesystemVault, write_note: WriteNote
+) -> None:
+    _seed(write_note)
+    write_note(
+        "01-Universidad/tareas.md",
+        "- [ ] Siguiente paso [id:: t-abc234] [area:: universidad] [esfuerzo:: mucho] "
+        "[propuesta:: 2026-W44/universidad/p1]\n",
+    )
+
+    with pytest.raises(ApplicationError, match="errores de formato"):
+        ProposalReview(vault, MemoryAuditLog(), FakeClock()).accept(REF)
+
+
+def test_two_tasks_with_the_same_origin_are_reported(
+    vault: FilesystemVault, write_note: WriteNote
+) -> None:
+    line = (
+        "- [ ] Paso [id:: {}] [area:: universidad] [esfuerzo:: 1h] "
+        "[propuesta:: 2026-W44/universidad/p1]\n"
+    )
+    write_note("01-Universidad/a.md", line.format("t-abc234"))
+    write_note("01-Universidad/b.md", line.format("t-abc235"))
+
+    with pytest.raises(ApplicationError, match="varias tareas"):
+        find_by_origin(vault, str(REF))

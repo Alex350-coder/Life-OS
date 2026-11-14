@@ -307,3 +307,32 @@ def test_rejections_of_another_area_or_week_do_not_count(
 
     assert TaskId("t-abc234") in {i.task_id for i in result.proposal.items}
     assert result.repeated_rejections == 0
+
+
+def test_unreadable_proposal_note_stops_the_write_and_names_the_note(
+    registry: AgentRegistry,
+    area_vault: FilesystemVault,
+    audit: MemoryAuditLog,
+    write_note: WriteNote,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lifeos.ports.vault import Snapshot, VaultIOError, VaultPath
+
+    write_note("Propuestas/2026-W44/otro.md", HEADER.format("universidad"))
+    runner = _runner(registry, area_vault, audit)
+    _activate(registry, runner)
+    original = area_vault.read
+
+    def flaky(path: VaultPath) -> Snapshot:
+        if path.value == "Propuestas/2026-W44/otro.md":
+            raise VaultIOError("bloqueada")
+        return original(path)
+
+    monkeypatch.setattr(area_vault, "read", flaky)
+
+    result = runner.run("universidad", week=WEEK)
+
+    assert result.path is None  # no se arriesga a repetir un rechazo
+    assert any("Propuestas/2026-W44/otro.md" in alert for alert in result.alerts)
+    monkeypatch.undo()
+    assert all("universidad" not in str(p) for p in area_vault.list_notes(VaultPath("Propuestas")))

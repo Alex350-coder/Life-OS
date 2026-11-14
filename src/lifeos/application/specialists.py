@@ -242,22 +242,21 @@ class SpecialistRunner:
         return _Drafted(items, "ia", _discard_alert(discarded), ai_failed=False)
 
     def _rejected(self, area: Area, week: IsoWeek) -> tuple[frozenset[Signature], tuple[str, ...]]:
-        """Lo rechazado esa semana en el área (DT-30). Lo lee el código del sistema, no el
-        agente: su permiso sigue siendo solo su carpeta (ADR-0018). Una nota ilegible se
-        avisa y no frena la ejecución."""
+        """Lo rechazado esa semana en el área (DT-30) y las notas que no se pudieron leer. Lo
+        lee el código del sistema, no el agente: su permiso sigue siendo solo su carpeta
+        (ADR-0018)."""
         try:
             notes = self._vault.list_notes(VaultPath(f"{PROPOSALS_ROOT}/{week}"))
         except NoteNotFoundError:
             return frozenset(), ()
         found: set[Signature] = set()
-        unreadable = 0
+        unreadable: list[str] = []
         for path in notes:
             try:
                 found |= rejected_signatures(self._vault.read(path).text, area)
             except (NoteNotFoundError, VaultIOError):
-                unreadable += 1
-        alerts = (f"{unreadable} notas de propuestas no se pudieron leer",) if unreadable else ()
-        return frozenset(found), alerts
+                unreadable.append(str(path))
+        return frozenset(found), tuple(sorted(unreadable))
 
     def _audit_fallback(self, agent_id: str, correlation: str) -> None:
         self._audit.append(
@@ -299,9 +298,13 @@ class SpecialistRunner:
         alerts += drafted.alerts
         if context.goals.problems:
             alerts += (f"{context.goals.problems} líneas de metas no se entendieron",)
-        rejected, read_alerts = self._rejected(context.area, context.week)
+        rejected, unreadable = self._rejected(context.area, context.week)
         items, repeated = without_rejected(drafted.items, rejected)
-        alerts += read_alerts
+        if unreadable:
+            alerts += (
+                f"no se pudieron leer {', '.join(unreadable)}: no se escribe nada hasta poder "
+                "comprobar lo ya rechazado",
+            )
         if repeated:
             alerts += (f"{repeated} propuestas ya rechazadas esta semana no se repiten",)
         proposal = AreaProposal(agent_id, context.area, context.week, drafted.source, items)
@@ -310,7 +313,7 @@ class SpecialistRunner:
             if note is not None:
                 alerts += (note,)
             return SpecialistResult(proposal, None, True, recorded, alerts, repeated)
-        if not items:
+        if not items or unreadable:  # sin saber qué se rechazó, no se escribe (falla cerrado)
             return SpecialistResult(proposal, None, False, False, alerts, repeated)
         # La llamada al modelo puede tardar: si se desactivó o la política cambió, no se escribe.
         _, current = self._registry.runnable(agent_id)
