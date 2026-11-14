@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 from lifeos.adapters.jsonl_logs import JsonlUsageLog, JsonlUsageReader
-from lifeos.ports.logs import CostStatus, UsageOutcome, UsageRecord
+from lifeos.ports.logs import CostStatus, LogWriteError, UsageOutcome, UsageRecord
 
 pytestmark = [pytest.mark.unit]
 
@@ -93,3 +93,11 @@ def test_naive_or_non_utc_timestamps_are_malformed(tmp_path: Path) -> None:
     with path.open("a", encoding="utf-8") as handle:
         handle.write(good.replace("Z", "") + "\n")
     assert JsonlUsageReader(tmp_path).read_month(2026, 11).malformed == 1
+
+
+def test_oversized_month_file_is_refused(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # DT-13: los logs se leen enteros; un archivo desmesurado se rechaza con un error claro.
+    monkeypatch.setattr("lifeos.adapters.jsonl_logs.MAX_LOG_FILE_BYTES", 10)
+    (tmp_path / "usage-2026-11.jsonl").write_bytes(b"{}\n" * 10)
+    with pytest.raises(LogWriteError, match="demasiado grande"):
+        JsonlUsageReader(tmp_path).read_month(2026, 11)

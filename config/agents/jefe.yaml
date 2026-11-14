@@ -11,7 +11,8 @@ modelo_solicitado:
 contrato:                      # propuesta semanal con IA (F3-T06); siempre pasa el validador
   entrada: plan_v1
   salida: plan_v1
-herramientas: [leer_nota, listar_tareas, crear_captura, publicar_plan]
+# leer_calendario: disponibilidad (freebusy); publicar_calendario: bloques aprobados (ADR-0017).
+herramientas: [leer_nota, listar_tareas, crear_captura, publicar_plan, leer_calendario, publicar_calendario]
 permisos_solicitados:
   lectura:
     - _sistema/

@@ -126,7 +126,7 @@ def semana(
 def proponer(request: Request, body: PlanIn) -> JSONResponse:
     web = _web(request)
     origin = PlanOrigin.IA if body.ia else PlanOrigin.HEURISTICA
-    with web.writing():
+    with web.writing(use_ai=body.ia):
         result = jefe(web.runtime(use_ai=body.ia)).proponer(_week(body.semana), origin=origin)
     return _plan(result)
 
@@ -143,7 +143,7 @@ def aprobar(request: Request, body: ApprovalIn) -> JSONResponse:
 def replanificar(request: Request, body: PlanIn) -> JSONResponse:
     web = _web(request)
     origin = PlanOrigin.IA if body.ia else PlanOrigin.HEURISTICA
-    with web.writing():
+    with web.writing(use_ai=body.ia):
         result = jefe(web.runtime(use_ai=body.ia)).replanificar(_week(body.semana), origin=origin)
     return _plan(result)
 
@@ -156,7 +156,7 @@ def checkin(request: Request, body: CheckInIn) -> JSONResponse:
     web = _web(request)
     state = _choice(CheckInState, body.estado, "estado")
     task_id = _task_id(body.tarea)
-    with web.writing():
+    with web.writing(use_ai=body.ia):
         result = coach(web.runtime(use_ai=body.ia)).checkin(
             body.texto, state=state, task_id=task_id, capture=body.capturar or None, use_ai=body.ia
         )

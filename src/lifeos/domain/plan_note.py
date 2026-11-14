@@ -10,7 +10,7 @@ el formato se rechaza (fallo cerrado).
 import re
 from collections.abc import Iterable, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from lifeos.domain.capacity import Interval, local_datetime
@@ -37,6 +37,7 @@ ADJUSTMENTS_HEADING = "Ajustes atendidos"
 JUSTIFICATION_HEADING = "Justificación"
 NO_TEXT = "—"
 BLOCKS_HEADING = "Bloques por día"
+EXTERNAL_HEADING = "Eventos externos"  # solo intervalos ocupados, sin títulos (ADR-0017)
 DAILY_BLOCK_SECTIONS = ("Lo no negociable", "Bloques", "Tiempo protegido")
 CLOSING_HEADING = "Cierre"
 _KIND_TAG = {BlockKind.FIJO: "fijo", BlockKind.PROTEGIDO: "protegido"}
@@ -92,6 +93,14 @@ def format_span(interval: Interval, zone: ZoneInfo) -> str:
     """`HH:MM–HH:MM` en hora local; la medianoche siguiente se escribe `24:00`."""
     day = interval.start.astimezone(zone).date()
     return f"{_hhmm(interval.start, zone, day)}–{_hhmm(interval.end, zone, day)}"
+
+
+def _external_span(interval: Interval, zone: ZoneInfo) -> str:
+    """Como `format_span`; si el intervalo cruza días, con las fechas de inicio y fin."""
+    start, end = interval.start.astimezone(zone), interval.end.astimezone(zone)
+    if (end - timedelta(microseconds=1)).date() == start.date():
+        return format_span(interval, zone)
+    return f"{start:%Y-%m-%d %H:%M} → {end:%Y-%m-%d %H:%M}"
 
 
 def _span_text(block: Block, zone: ZoneInfo) -> str:
@@ -185,6 +194,16 @@ def render_weekly(
             for u in proposal.unplanned
         ],
         "Ninguna",
+    )
+    lines += ["", f"## {EXTERNAL_HEADING}"]
+    lines += _bullets(
+        [
+            f"{_day_label(e.interval.start.astimezone(zone).date())} · "
+            f"{_external_span(e.interval, zone)} · ocupado · fuente: {e.source} · "
+            f"confianza: {e.confidence.value}"
+            for e in context.external
+        ],
+        "Ninguno",
     )
     lines += ["", "## Conflictos y alertas"]
     lines += _bullets([clean(alert) for alert in proposal.alerts], "Ninguno")

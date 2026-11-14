@@ -9,7 +9,10 @@ planes ni cambia tareas.
 import hashlib
 import hmac
 import uuid
+from collections.abc import Callable
+from concurrent.futures import Future
 from datetime import datetime, timedelta
+from typing import Protocol
 
 from lifeos.application import ritual_messages as messages
 from lifeos.application.capture import capture
@@ -39,6 +42,12 @@ _CAPTURE_COMMAND = "/captura"
 _NOTHING_SAVED = "no guardé nada"
 
 
+class VoiceWorker(Protocol):
+    """Ejecuta la transcripción fuera del hilo principal (`ThreadPoolExecutor` de un hilo)."""
+
+    def submit(self, fn: Callable[[bytes], str], audio: bytes, /) -> Future[str]: ...
+
+
 def chat_fingerprint(chat_id: int, key: bytes) -> str:
     """Huella del chat para la auditoría: agrupa intentos sin guardar el id. Lleva clave (HMAC):
     un hash simple de un número de ~10 cifras se invertiría por fuerza bruta en segundos."""
@@ -57,6 +66,7 @@ class OwnerBot:
         audit: AuditLog,
         transcriber: Transcriber | None,
         fingerprint_key: bytes,
+        voice_worker: VoiceWorker | None = None,
     ) -> None:
         if not fingerprint_key:
             raise ValueError("la huella de SEC-12 necesita una clave")
@@ -69,6 +79,8 @@ class OwnerBot:
         self._transcriber = transcriber
         self._key = fingerprint_key
         self._last_rejection: dict[str, datetime] = {}
+        self._worker = voice_worker
+        self._pending: list[Future[str]] = []
 
     def handle(self, message: IncomingMessage) -> None:
         if message.chat_id is None:
@@ -157,11 +169,43 @@ class OwnerBot:
                 "Envíala en partes más cortas."
             )
         try:
-            text = self._transcriber.transcribe(self._channel.download_voice(voice)).strip()
-        except TranscriberUnavailableError:
-            return f"La voz no está disponible (instala el extra 'voz'); {_NOTHING_SAVED}."
+            audio = self._channel.download_voice(voice)
+            if self._worker is not None:
+                # DT-04: solo la transcripción va a otro hilo; la captura y la respuesta vuelven
+                # al hilo principal en `drain`, así la bóveda y Telegram no se tocan en paralelo.
+                self._pending.append(self._worker.submit(self._transcriber.transcribe, audio))
+                return "Nota de voz recibida; la estoy transcribiendo y te aviso al terminar."
+            text = self._transcriber.transcribe(audio)
         except LifeOSError as error:
-            return f"No pude transcribir la nota ({error}); {_NOTHING_SAVED}."
+            return self._voice_error(error)
+        return self._voice_result(text)
+
+    @property
+    def busy(self) -> bool:
+        return bool(self._pending)
+
+    def drain(self) -> None:
+        """Atiende las transcripciones terminadas, en el orden en que llegaron."""
+        while self._pending and self._pending[0].done():
+            future = self._pending.pop(0)
+            error = future.exception()
+            if isinstance(error, LifeOSError):
+                self._reply(self._voice_error(error))
+            elif error is not None:
+                self._reply(
+                    f"No pude transcribir la nota ({type(error).__name__}); {_NOTHING_SAVED}."
+                )
+            else:
+                self._reply(self._voice_result(future.result()))
+
+    @staticmethod
+    def _voice_error(error: LifeOSError) -> str:
+        if isinstance(error, TranscriberUnavailableError):
+            return f"La voz no está disponible (instala el extra 'voz'); {_NOTHING_SAVED}."
+        return f"No pude transcribir la nota ({error}); {_NOTHING_SAVED}."
+
+    def _voice_result(self, raw: str) -> str:
+        text = raw.strip()
         if not text:
             return f"No entendí la nota de voz; {_NOTHING_SAVED}."
         saved = self._capture(text, source=VOICE_SOURCE, unconfirmed=True)

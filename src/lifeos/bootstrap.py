@@ -17,8 +17,13 @@ from types import MappingProxyType
 from typing import Self
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
+from lifeos.adapters.encrypted_backup import EncryptedVaultBackup
 from lifeos.adapters.filesystem_vault import FilesystemVault
-from lifeos.adapters.json_state import JsonRitualState
+from lifeos.adapters.google_access import GoogleCalendarAccess
+from lifeos.adapters.google_calendar import API_BASE, GoogleBusyReader, GoogleCalendarWriter
+from lifeos.adapters.google_oauth import AccessTokens, GoogleOAuth, OAuthEndpoints
+from lifeos.adapters.google_tokens import Grant, TokenStore
+from lifeos.adapters.json_state import JsonOffsetStore, JsonRitualState
 from lifeos.adapters.jsonl_logs import (
     JsonlAuditLog,
     JsonlAuditReader,
@@ -33,6 +38,8 @@ from lifeos.adapters.system_clock import SystemClock
 from lifeos.adapters.telegram import DEFAULT_BASE_URL, TelegramBotClient, TelegramNotifier
 from lifeos.adapters.whisper import MODEL_SIZES, FasterWhisperTranscriber
 from lifeos.adapters.yaml_config import YamlConfigSource
+from lifeos.application.calendar_publication import CalendarPublisher
+from lifeos.application.calendar_tools import CalendarTools
 from lifeos.application.closing import DailyClosing
 from lifeos.application.coach import CoachSession
 from lifeos.application.coach_ai import AiCoachWriter
@@ -47,6 +54,8 @@ from lifeos.application.permissions import (
 )
 from lifeos.application.rituals import RitualRunner
 from lifeos.application.tools import ToolRegistry
+from lifeos.ports.backup import VaultBackup
+from lifeos.ports.calendar import BusyReader, CalendarAccess, CalendarWriter
 from lifeos.ports.chat import ChatChannel
 from lifeos.ports.clock import Clock
 from lifeos.ports.config import (
@@ -120,6 +129,9 @@ class Runtime:
     # Configuración validada de los agentes y lector de auditoría (vista de la web, F5-T04).
     agents: tuple[AgentConfig, ...]
     audit_reader: AuditReader
+    # Google Calendar (ADR-0017): sin autorizar, las herramientas no leen ni escriben.
+    calendar: CalendarTools | None = None
+    calendar_publisher: CalendarPublisher | None = None
 
 
 def _provider_secrets(settings: Settings, catalog: ModelCatalog) -> dict[str, Secret]:
@@ -150,12 +162,93 @@ def _check_timezone(settings: Settings) -> None:
         ) from None
 
 
+# --- Google Calendar (Fase 7, ADR-0017) ------------------------------------------------------
+
+GOOGLE_CLIENT_ID_ENV = "GOOGLE_CLIENT_ID"
+GOOGLE_CLIENT_SECRET_ENV = "GOOGLE_CLIENT_SECRET"  # noqa: S105  # nosec B105 - nombre
+GOOGLE_OAUTH_ENV = "LIFEOS_GOOGLE_OAUTH"  # solo para pruebas locales (auth, token y revoke)
+GOOGLE_API_ENV = "LIFEOS_GOOGLE_API"  # solo para pruebas locales
+
+
+def _state_dir(settings: Settings) -> Path:
+    return Path(settings.environ.get(STATE_DIR_ENV) or settings.project_root / DEFAULT_STATE_DIR)
+
+
+GOOGLE_TOKENS_DIR_ENV = "LIFEOS_TOKENS_DIR"
+
+
+def _tokens_dir(settings: Settings) -> Path:
+    """Los refresh tokens van fuera del proyecto (que puede estar en OneDrive): por defecto en
+    `~/.lifeos`, que no se sincroniza."""
+    return Path(settings.environ.get(GOOGLE_TOKENS_DIR_ENV) or Path.home() / ".lifeos")
+
+
+def _google_secret(settings: Settings) -> Secret | None:
+    raw = settings.environ.get(GOOGLE_CLIENT_SECRET_ENV) or ""
+    return Secret(raw) if raw.strip() else None
+
+
+def _google_oauth(settings: Settings) -> GoogleOAuth | None:
+    """Sin GOOGLE_CLIENT_ID la integración está desactivada (RULES G.1)."""
+    client_id = (settings.environ.get(GOOGLE_CLIENT_ID_ENV) or "").strip()
+    if not client_id:
+        return None
+    base = settings.environ.get(GOOGLE_OAUTH_ENV)
+    try:
+        endpoints = (
+            OAuthEndpoints(f"{base}/auth", f"{base}/token", f"{base}/revoke") if base else None
+        )
+        return GoogleOAuth(client_id, _google_secret(settings), endpoints=endpoints)
+    except ValueError as error:
+        raise ConfigRejectedError(GOOGLE_CLIENT_ID_ENV, (str(error),)) from None
+
+
+def _calendar_adapters(settings: Settings) -> tuple[BusyReader | None, CalendarWriter | None]:
+    oauth = _google_oauth(settings)
+    if oauth is None:
+        return None, None
+    store = TokenStore(_tokens_dir(settings))
+    base = settings.environ.get(GOOGLE_API_ENV) or API_BASE
+    try:
+        reader = (
+            GoogleBusyReader(AccessTokens(oauth, store, Grant.LECTURA), base_url=base)
+            if store.has(Grant.LECTURA)
+            else None
+        )
+        writer = (
+            GoogleCalendarWriter(
+                AccessTokens(oauth, store, Grant.ESCRITURA),
+                store,
+                time_zone=settings.timezone or "UTC",
+                base_url=base,
+            )
+            if store.has(Grant.ESCRITURA)
+            else None
+        )
+    except ValueError as error:
+        raise ConfigRejectedError(GOOGLE_API_ENV, (str(error),)) from None
+    return reader, writer
+
+
+def calendar_access(settings: Settings, *, clock: Clock | None = None) -> CalendarAccess:
+    """Conectar, consultar o revocar el acceso (`lifeos-calendario`)."""
+    oauth = _google_oauth(settings)
+    if oauth is None:
+        raise ConfigRejectedError(
+            GOOGLE_CLIENT_ID_ENV,
+            ("falta el id del cliente OAuth de escritorio de Google (ver README del proyecto)",),
+        )
+    now = (clock or SystemClock(UTC)).now
+    return GoogleCalendarAccess(oauth, TokenStore(_tokens_dir(settings)), now=now)
+
+
 def _jefe(
     tools: ToolRegistry | None,
     gateway: ModelGateway | None,
     permissions: Mapping[str, EffectivePermissions],
     clock: Clock,
     settings: Settings,
+    calendar: CalendarTools | None = None,
 ) -> JefePlanner | None:
     if tools is None or "jefe" not in permissions:
         return None
@@ -164,7 +257,9 @@ def _jefe(
         if gateway is not None
         else None
     )
-    return JefePlanner(tools, clock, drafter=drafter, configured_zone=settings.timezone)
+    return JefePlanner(
+        tools, clock, drafter=drafter, configured_zone=settings.timezone, calendar=calendar
+    )
 
 
 def _coach(
@@ -205,7 +300,11 @@ def build_runtime(
     )
     secrets = _provider_secrets(settings, catalog) if with_llm else {}
     # Toda clave conocida se redacta de los logs (SEC-08), incluido el token de Telegram.
-    known = tuple(secret.reveal() for secret in (*secrets.values(), *extra_secrets))
+    google = _google_secret(settings)
+    google_secrets = (google,) if google is not None else ()
+    known = tuple(
+        secret.reveal() for secret in (*secrets.values(), *extra_secrets, *google_secrets)
+    )
     usage_log = JsonlUsageLog(settings.logs_dir, secrets=known)
     audit_log = JsonlAuditLog(settings.logs_dir, secrets=known)
     # Los logs siguen en UTC (ADR-0008); el plan usa la zona de horario.md.
@@ -216,6 +315,9 @@ def build_runtime(
     vault = FilesystemVault(settings.vault_path) if settings.vault_path is not None else None
     tools = ToolRegistry(vault, permissions, audit_log, clock) if vault is not None else None
     coach = _coach(tools, gateway, permissions, clock, settings)
+    reader, writer = _calendar_adapters(settings)
+    calendar = CalendarTools(permissions, audit_log, clock, reader=reader, writer=writer)
+    jefe = _jefe(tools, gateway, permissions, clock, settings, calendar)
     closing = (
         DailyClosing(vault, coach, clock, audit_log, configured_zone=settings.timezone)
         if vault is not None and coach is not None
@@ -232,12 +334,14 @@ def build_runtime(
         gateway=gateway,
         tools=tools,
         vault=vault,
-        jefe=_jefe(tools, gateway, permissions, clock, settings),
+        jefe=jefe,
         coach=coach,
         closing=closing,
         usage_reader=JsonlUsageReader(settings.logs_dir),
         agents=agents,
         audit_reader=JsonlAuditReader(settings.logs_dir),
+        calendar=calendar,
+        calendar_publisher=CalendarPublisher(jefe, calendar, clock) if jefe is not None else None,
     )
 
 
@@ -264,6 +368,7 @@ class ServiceRuntime:
     owner_chat_id: int
     fingerprint_key: bytes = field(repr=False)  # clave de la huella de SEC-12
     lock: AbstractContextManager[object] = field(repr=False)
+    offsets: JsonOffsetStore | None = None
 
 
 def _telegram_token(settings: Settings) -> Secret:
@@ -314,9 +419,7 @@ def build_service(settings: Settings, *, clock: Clock | None = None) -> ServiceR
     vault, jefe, coach = runtime.vault, runtime.jefe, runtime.coach
     if vault is None or jefe is None or coach is None:
         raise ConfigRejectedError("agentes", ("el servicio necesita al Jefe y al Coach",))
-    state_dir = Path(
-        settings.environ.get(STATE_DIR_ENV) or settings.project_root / DEFAULT_STATE_DIR
-    )
+    state_dir = _state_dir(settings)
     rituals = RitualRunner(
         vault,
         jefe,
@@ -338,4 +441,20 @@ def build_service(settings: Settings, *, clock: Clock | None = None) -> ServiceR
         # Derivada del token: secreta, estable y sin otro secreto que guardar.
         fingerprint_key=hashlib.sha256(b"lifeos-sec12:" + token.reveal().encode()).digest(),
         lock=ProcessLock(state_dir / "servicio.lock"),
+        offsets=JsonOffsetStore(state_dir / "telegram.json"),
     )
+
+
+BACKUP_DIR_ENV = "LIFEOS_BACKUP_DIR"
+# Opcional, para un respaldo programado. Es el nombre de la variable, no una frase.
+BACKUP_PASSPHRASE_ENV = "LIFEOS_BACKUP_PASSPHRASE"  # noqa: S105  # nosec B105
+
+
+def vault_backup() -> VaultBackup:
+    return EncryptedVaultBackup()
+
+
+def backup_dir(settings: Settings) -> Path:
+    """Fuera de OneDrive por defecto: un respaldo en la misma nube que la bóveda no protege de
+    una sincronización que borra o corrompe."""
+    return Path(settings.environ.get(BACKUP_DIR_ENV) or Path.home() / "LifeOS-Respaldos")

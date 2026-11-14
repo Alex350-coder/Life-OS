@@ -21,7 +21,8 @@ global:
 
 agentes:
   jefe:
-    herramientas: [leer_nota, listar_tareas, crear_captura, publicar_plan]
+    # leer_calendario y publicar_calendario: Google Calendar (ADR-0017); publicar es del dueño.
+    herramientas: [leer_nota, listar_tareas, crear_captura, publicar_plan, leer_calendario, publicar_calendario]
     lectura:
       - _sistema/
       - 00-Inbox/

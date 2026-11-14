@@ -1,5 +1,8 @@
 """Bot del propietario: SEC-12, captura por texto y voz y briefing (F6-T03, F6-T04)."""
 
+from collections.abc import Callable
+from concurrent.futures import Future
+
 import pytest
 
 from lifeos.adapters.filesystem_vault import FilesystemVault
@@ -33,6 +36,7 @@ def make_bot(
     *,
     transcriber: FakeTranscriber | None = None,
     audit: MemoryAuditLog | None = None,
+    worker: "ManualWorker | None" = None,
 ) -> tuple[OwnerBot, FakeChannel, MemoryAuditLog]:
     clock = FakeClock(at(MON, "09:00"))
     log = audit or MemoryAuditLog()
@@ -47,6 +51,7 @@ def make_bot(
         audit=log,
         transcriber=transcriber,
         fingerprint_key=b"clave-de-prueba",
+        voice_worker=worker,
     )
     return bot, channel, log
 
@@ -161,6 +166,58 @@ def test_voice_is_transcribed_and_captured_unconfirmed(vault: FilesystemVault) -
     reply = channel.sent[0][1]
     assert "sin confirmar" in reply
     assert "Comprar cuerdas para la guitarra" in reply
+
+
+class ManualWorker:
+    """Ejecutor de una prueba: guarda el trabajo y lo ejecuta cuando la prueba lo pide."""
+
+    def __init__(self) -> None:
+        self.jobs: list[tuple[Future[str], Callable[[], str]]] = []
+
+    def submit(self, fn: Callable[[bytes], str], audio: bytes) -> Future[str]:
+        future: Future[str] = Future()
+        self.jobs.append((future, lambda: fn(audio)))
+        return future
+
+    def run_all(self) -> None:
+        for future, job in self.jobs:
+            try:
+                future.set_result(job())
+            except Exception as error:
+                future.set_exception(error)
+        self.jobs = []
+
+
+def test_voice_in_the_background_answers_at_once_and_captures_when_done(
+    vault: FilesystemVault,
+) -> None:
+    # DT-04: transcribir no bloquea al bot; la captura y la respuesta llegan en el hilo principal.
+    worker = ManualWorker()
+    bot, channel, _ = make_bot(vault, transcriber=FakeTranscriber(), worker=worker)
+    bot.handle(voice(1))
+    assert "transcribiendo" in channel.sent[0][1]
+    assert bot.busy and inbox(vault) == []
+    bot.handle(text(2, "/ayuda"))  # se sigue atendiendo mientras tanto
+    assert channel.sent[1][1] == HELP
+    bot.drain()
+    assert inbox(vault) == []  # todavía no terminó
+    worker.run_all()
+    bot.drain()
+    assert not bot.busy
+    (note,) = inbox(vault)
+    assert "estado: sin_confirmar" in note
+    assert "Comprar cuerdas" in channel.sent[-1][1]
+
+
+def test_background_transcription_errors_are_reported(vault: FilesystemVault) -> None:
+    worker = ManualWorker()
+    transcriber = FakeTranscriber(result=TranscriptionError("audio corrupto"))
+    bot, channel, _ = make_bot(vault, transcriber=transcriber, worker=worker)
+    bot.handle(voice(1))
+    worker.run_all()
+    bot.drain()
+    assert "audio corrupto" in channel.sent[-1][1]
+    assert inbox(vault) == []
 
 
 def test_long_voice_is_rejected_before_downloading(vault: FilesystemVault) -> None:

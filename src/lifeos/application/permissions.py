@@ -30,9 +30,14 @@ TOOL_WRITE_MODES: Mapping[str, WriteMode | None] = MappingProxyType(
         "crear_captura": WriteMode.CREAR,
         "anexar_checkin": WriteMode.ANEXAR_SECCION,
         "publicar_plan": WriteMode.PLAN,  # solo el dueño del plan global (ADR-0002, SEC-09)
+        # Calendario externo (ADR-0017): no escriben en la bóveda. Publicar es solo del dueño.
+        "leer_calendario": None,
+        "publicar_calendario": None,
     }
 )
 PUBLISH_TOOL = "publicar_plan"
+CALENDAR_READ_TOOL = "leer_calendario"
+CALENDAR_WRITE_TOOL = "publicar_calendario"
 _SOURCE = "configuración de agentes"
 # RULES E.12: Salud y Finanzas sin lectura de agentes hasta su fase. La política puede ampliar
 # las áreas restringidas, nunca quitar estas.
@@ -92,6 +97,10 @@ def _check_ceiling(name: str, ceiling: AgentCeiling, policy: Policy) -> list[str
             problems.append(f"{name}: solo el dueño del plan global puede tener '{PUBLISH_TOOL}'")
         elif not _plan_grants(ceiling):
             problems.append(f"{name}: '{PUBLISH_TOOL}' requiere escritura en modo plan")
+    if CALENDAR_WRITE_TOOL in ceiling.tools and name != policy.plan_owner:
+        problems.append(
+            f"{name}: solo el dueño del plan global puede tener '{CALENDAR_WRITE_TOOL}'"
+        )
     problems += [
         f"{name}: lectura '{root}' está en un área restringida"
         for root in ceiling.reads

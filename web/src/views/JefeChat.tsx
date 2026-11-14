@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { ApiError, post } from "../api/client";
 import type { PlanResult } from "../api/types";
-import { ChatLog, type ChatMessage } from "../components/ChatLog";
+import { ChatLog } from "../components/ChatLog";
+import { useStoredChat } from "../components/useStoredChat";
 import { jefeReply } from "../components/chatFormat";
 
 type Action = "propuesta" | "aprobacion" | "revision";
@@ -33,12 +34,10 @@ type Props = {
 };
 
 export function JefeChat({ week, isDisabled = false, onChanged }: Props) {
-  const [messages, setMessages] = useState<ChatMessage[]>([]);
+  const { messages, add: say, clear } = useStoredChat("lifeos.chat.jefe");
   const [useAi, setUseAi] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
 
-  const say = (author: ChatMessage["author"], lines: string[], isError = false) =>
-    setMessages((current) => [...current, { id: current.length + 1, author, lines, isError }]);
 
   async function run(action: Action, label: string, usesAi: boolean) {
     const ai = usesAi && useAi;
@@ -63,7 +62,7 @@ export function JefeChat({ week, isDisabled = false, onChanged }: Props) {
       <p className="muted">
         El Jefe propone y valida; nada queda aprobado hasta que tú lo apruebas.
       </p>
-      <ChatLog label="Conversación con el Jefe" messages={messages} />
+      <ChatLog label="Conversación con el Jefe" messages={messages} onClear={clear} />
       <div className="row">
         {ACTIONS.map(({ action, label, usesAi }) => (
           <button key={action} type="button" disabled={isBusy || isDisabled} onClick={() => void run(action, label, usesAi)}>

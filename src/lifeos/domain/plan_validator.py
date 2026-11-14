@@ -10,6 +10,7 @@ from collections.abc import Iterable
 from datetime import date, timedelta
 
 from lifeos.domain.capacity import DayCapacity, Interval
+from lifeos.domain.external import first_overlap
 from lifeos.domain.ids import TaskId
 from lifeos.domain.plan import (
     PLANNABLE,
@@ -169,6 +170,16 @@ def _check_placement(block: Block, context: PlanningContext) -> list[Conflict]:
     blocking = _blocking_conflict(block, capacity, context)
     if blocking is not None:
         return [blocking]
+    external = first_overlap(block.interval, context.external)
+    if external is not None:
+        return [
+            Conflict(
+                ConflictCode.EVENTO_EXTERNO,
+                f"{_label(block, context)} se solapa con un intervalo ocupado de "
+                f"{external.source} (confianza {external.confidence.value})",
+                day,
+            )
+        ]
     if not _within(block.interval, capacity.free):
         return [
             Conflict(

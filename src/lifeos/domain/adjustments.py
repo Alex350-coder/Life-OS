@@ -19,7 +19,8 @@ from lifeos.domain.capacity import local_datetime
 from lifeos.domain.checkin import CHECKIN_SECTION, CheckInEntry
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.ids import TaskId
-from lifeos.domain.schedule import TimeRange
+from lifeos.domain.plan import Block, BlockKind
+from lifeos.domain.schedule import MINUTES_PER_DAY, TimeRange
 from lifeos.domain.sections import section_lines
 
 MARKER = "ajuste:"
@@ -135,3 +136,35 @@ def pending(
         for adjustment in adjustments
         if (after is None or adjustment.moment(zone) > after) and adjustment.moment(zone) <= until
     )
+
+
+def _local_span(block: Block, zone: ZoneInfo) -> TimeRange | None:
+    start = block.interval.start.astimezone(zone)
+    end = block.interval.end.astimezone(zone)
+    if start.date() != end.date() and end.time() != time(0, 0):
+        return None  # un bloque que cruza la medianoche no se compara con un rango local
+    end_minutes = (
+        MINUTES_PER_DAY if end.date() != start.date() else end.hour * MINUTES_PER_HOUR + end.minute
+    )
+    return TimeRange(start.hour * MINUTES_PER_HOUR + start.minute, end_minutes)
+
+
+def matching_plan(
+    adjustments: Iterable[Adjustment], blocks: Iterable[Block], zone: ZoneInfo
+) -> tuple[tuple[Adjustment, ...], tuple[Adjustment, ...]]:
+    """(válidas, descartadas): un bloque perdido solo cuenta si coincide con un bloque de trabajo
+    del plan del día, con la misma tarea y el mismo horario (DT-11). Las demás propuestas pasan."""
+    planned = {
+        (block.task_id, _local_span(block, zone))
+        for block in blocks
+        if block.kind is BlockKind.TRABAJO
+    }
+    kept: list[Adjustment] = []
+    dropped: list[Adjustment] = []
+    for adjustment in adjustments:
+        missed = adjustment.kind is AdjustmentKind.BLOQUE_PERDIDO
+        if missed and (adjustment.task_id, adjustment.span) not in planned:
+            dropped.append(adjustment)
+        else:
+            kept.append(adjustment)
+    return tuple(kept), tuple(dropped)

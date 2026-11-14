@@ -3,12 +3,14 @@ import { checkSession, onSessionLost, postVoid, resetSession } from "./api/clien
 import { ViewBoundary } from "./components/ViewBoundary";
 import { AgentsView } from "./views/AgentsView";
 import { HistoryView } from "./views/HistoryView";
+import { OfficeView } from "./views/OfficeView";
 import { TasksView } from "./views/TasksView";
 import { TodayView } from "./views/TodayView";
 import { WeekView } from "./views/WeekView";
 
 const TABS = [
   { id: "hoy", label: "Hoy", View: TodayView },
+  { id: "oficina", label: "Oficina", View: OfficeView },
   { id: "semana", label: "Semana", View: WeekView },
   { id: "tareas", label: "Tareas", View: TasksView },
   { id: "historial", label: "Historial", View: HistoryView },
@@ -56,6 +58,18 @@ export function App() {
     setVisited((current) => new Set([...current, id]));
     window.history.replaceState(null, "", `#${id}`);
   }
+
+  // La oficina abre otras vistas cambiando el #: aquí se sigue igual que un clic en la pestaña.
+  useEffect(() => {
+    const follow = () => {
+      const id = TABS.find((item) => `#${item.id}` === window.location.hash)?.id;
+      if (id === undefined) return;
+      setTab(id);
+      setVisited((current) => new Set([...current, id]));
+    };
+    window.addEventListener("hashchange", follow);
+    return () => window.removeEventListener("hashchange", follow);
+  }, []);
 
   useEffect(() => {
     const label = TABS.find((item) => item.id === tab)?.label ?? "";

@@ -8,16 +8,23 @@ export interface ChatMessage {
 type Props = {
   label: string;
   messages: ChatMessage[];
+  onClear?: () => void;
 };
 
-// Conversación en memoria de la pestaña: lo que importa ya quedó en la bóveda (check-ins y
-// planes), así que no se guarda aparte.
+// La conversación se guarda en este navegador (useStoredChat, DT-18); lo importante ya quedó en
+// la bóveda (check-ins y planes).
 // El registro existe desde el principio (así se anuncia el primer mensaje) y solo se anuncian
 // las respuestas del agente: el eco de lo que escribe el propietario no se lee en voz alta.
-export function ChatLog({ label, messages }: Props) {
+export function ChatLog({ label, messages, onClear }: Props) {
   return (
-    // El registro tiene scroll propio: necesita foco para leerlo con el teclado (WCAG 2.1.1).
-    // eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex
+    <>
+    {onClear !== undefined && messages.length > 0 && (
+      <button type="button" className="ghost small" onClick={onClear}>
+        Borrar conversación
+      </button>
+    )}
+    {/* El registro tiene scroll propio: necesita foco para leerlo con el teclado (WCAG 2.1.1). */}
+    {/* eslint-disable-next-line jsx-a11y/no-noninteractive-tabindex */}
     <div className="chat" role="log" aria-label={label} aria-relevant="additions" tabIndex={0}>
       <ol className="chat-list">
       {messages.length === 0 && <li className="muted">Todavía no hay mensajes.</li>}
@@ -38,5 +45,6 @@ export function ChatLog({ label, messages }: Props) {
       ))}
       </ol>
     </div>
+    </>
   );
 }

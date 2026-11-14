@@ -25,6 +25,7 @@ class Received:
     path: str
     headers: dict[str, str]
     body: bytes
+    method: str = ""
 
 
 @dataclass
@@ -42,7 +43,9 @@ def _handler(stub: StubServer) -> type[BaseHTTPRequestHandler]:
         def _serve(self) -> None:
             length = int(self.headers.get("Content-Length") or 0)
             body = self.rfile.read(length) if length else b""
-            stub.received.append(Received(self.path, dict(self.headers.items()), body))
+            stub.received.append(
+                Received(self.path, dict(self.headers.items()), body, self.command)
+            )
             reply = stub.replies.pop(0) if stub.replies else Reply(status=599)
             time.sleep(reply.delay_s)
             try:
@@ -61,6 +64,8 @@ def _handler(stub: StubServer) -> type[BaseHTTPRequestHandler]:
 
         do_POST = _serve
         do_GET = _serve
+        do_PUT = _serve
+        do_DELETE = _serve
 
     return Handler
 

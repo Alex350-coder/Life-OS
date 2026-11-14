@@ -7,7 +7,14 @@ import pytest
 from lifeos.application.rituals import RitualReport
 from lifeos.application.tasks import ApplicationError
 from lifeos.ports.chat import ChatError, IncomingMessage
-from lifeos.service.main import BACKOFF_MAX_S, BACKOFF_START_S, ServiceLoop
+from lifeos.ports.state import StateError
+from lifeos.service.main import (
+    BACKOFF_MAX_S,
+    BACKOFF_START_S,
+    BUSY_POLL_TIMEOUT_S,
+    POLL_TIMEOUT_S,
+    ServiceLoop,
+)
 from tests.service.fakes import FakeChannel, text
 
 pytestmark = pytest.mark.unit
@@ -17,11 +24,28 @@ pytestmark = pytest.mark.unit
 class FakeBot:
     handled: list[int] = field(default_factory=list)
     fail_on: int | None = None
+    busy: bool = False
+    drains: int = 0
 
     def handle(self, message: IncomingMessage) -> None:
         self.handled.append(message.update_id)
         if message.update_id == self.fail_on:
             raise ApplicationError("bóveda ocupada")
+
+    def drain(self) -> None:
+        self.drains += 1
+
+
+@dataclass
+class MemoryOffsets:
+    stored: int | None = None
+    saved: list[int] = field(default_factory=list)
+
+    def load(self) -> int | None:
+        return self.stored
+
+    def save(self, offset: int) -> None:
+        self.saved.append(offset)
 
 
 @dataclass
@@ -58,6 +82,40 @@ def test_messages_are_handled_and_the_offset_advances() -> None:
     assert h.bot.handled == [10, 11]
     assert h.channel.polls == [None, 12]
     assert h.rituals.ticks == 2
+
+
+def test_offset_is_saved_before_handling_and_resumed_after_a_restart() -> None:
+    # DT-07: sin guardarlo, una caída entre atender y volver a pedir repetía la captura.
+    offsets = MemoryOffsets(stored=50)
+    h = Harness()
+    h.channel.batches = [(text(50, "a"), text(51, "b"))]
+    ServiceLoop(h.channel, h.bot, h.rituals, offsets=offsets, log=h.logs.append).run(iterations=1)
+    assert h.channel.polls == [50]
+    assert offsets.saved == [51, 52]
+
+
+def test_an_offset_that_cannot_be_saved_is_logged_and_the_message_still_handled() -> None:
+    class BrokenOffsets(MemoryOffsets):
+        def save(self, offset: int) -> None:
+            raise StateError("disco lleno")
+
+    h = Harness()
+    h.channel.batches = [(text(10, "a"),)]
+    loop = ServiceLoop(h.channel, h.bot, h.rituals, offsets=BrokenOffsets(), log=h.logs.append)
+    loop.run(iterations=1)
+    assert h.bot.handled == [10]
+    assert any("disco lleno" in line for line in h.logs)
+
+
+def test_pending_voice_work_is_drained_and_shortens_the_wait() -> None:
+    # DT-04: mientras se transcribe en segundo plano, el bucle vuelve antes a recoger el resultado.
+    h = Harness(bot=FakeBot(busy=True))
+    h.loop().run(iterations=2)
+    assert h.bot.drains == 2
+    assert h.channel.timeouts == [BUSY_POLL_TIMEOUT_S] * 2
+    h.bot.busy = False
+    h.loop().run(iterations=1)
+    assert h.channel.timeouts[-1] == POLL_TIMEOUT_S
 
 
 def test_a_failing_message_is_logged_and_does_not_block_the_next() -> None:

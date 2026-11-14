@@ -30,7 +30,8 @@ THIRD_PARTY = {
     "ports": set(),
     "application": set(),
     # faster_whisper: extra opcional de transcripción local (ADR-0015).
-    "adapters": {"yaml", "pydantic", "faster_whisper"},
+    # cryptography: respaldo cifrado de la bóveda (ADR-0016, SEC-14).
+    "adapters": {"yaml", "pydantic", "faster_whisper", "cryptography"},
     "cli": set(),
     "web": {"fastapi", "starlette", "pydantic", "uvicorn"},
     "service": set(),
