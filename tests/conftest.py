@@ -33,3 +33,10 @@ def write_note(vault: FilesystemVault) -> WriteNote:
 
 # Servidor HTTP local programado (tests/stub_http.py), compartido por adaptadores y SEC-08.
 pytest_plugins = ["tests.stub_http"]
+
+
+@pytest.fixture(autouse=True)
+def _plain_console(monkeypatch: pytest.MonkeyPatch) -> None:
+    """La salida de las pruebas no depende de FORCE_COLOR o NO_COLOR del entorno (cli/style.py)."""
+    monkeypatch.delenv("FORCE_COLOR", raising=False)
+    monkeypatch.delenv("NO_COLOR", raising=False)

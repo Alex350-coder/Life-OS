@@ -170,7 +170,7 @@ def main(
     open_browser: Callable[[str], object] | None = None,
     clock: Clock | None = None,
 ) -> int:
-    stdout, stderr = out or console(sys.stdout), err or console(sys.stderr)
+    stdout, stderr = out or console(sys.stdout), err or console(sys.stderr, error=True)
     try:
         args = _parser().parse_args(argv)
         week = _week(getattr(args, "semana", None))

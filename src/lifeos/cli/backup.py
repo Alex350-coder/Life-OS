@@ -61,7 +61,7 @@ def main(
     backup: VaultBackup | None = None,
     now: datetime | None = None,
 ) -> int:
-    stdout, stderr = out or console(sys.stdout), err or console(sys.stderr)
+    stdout, stderr = out or console(sys.stdout), err or console(sys.stderr, error=True)
     args = _parser().parse_args(argv)
     try:
         settings = Settings.from_env(project_root, environ)

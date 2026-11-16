@@ -295,7 +295,7 @@ def main(
     err: TextIO | None = None,
 ) -> int:
     stdout = out or output.console(sys.stdout)
-    stderr = err or output.console(sys.stderr)
+    stderr = err or output.console(sys.stderr, error=True)
     try:
         args = build_parser().parse_args(argv)
         runtime = _runtime(args, environ, project_root, clock)
