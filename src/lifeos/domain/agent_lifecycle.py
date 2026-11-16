@@ -7,7 +7,8 @@ importar → borrador → probar → aprobar → activar; desactivar detiene cua
 - La aprobación pertenece a la huella exacta del archivo (sha256), no al número de versión:
   restaurar una versión aprobada antes la deja aprobada (rollback rápido); una nunca aprobada
   vuelve a borrador.
-- Nada se borra: las versiones y el historial solo crecen.
+- Las versiones nunca se borran y guardan si fueron aprobadas. El historial conserva solo las
+  últimas `MAX_TRANSITIONS` transiciones: ninguna regla lo necesita completo (DT-28).
 
 Todas las funciones devuelven objetos nuevos.
 """
@@ -22,6 +23,7 @@ from lifeos.domain.errors import DomainError
 AGENT_ID_RE = re.compile(r"[a-z0-9-]{1,32}")
 _SHA256_RE = re.compile(r"[0-9a-f]{64}")
 MAX_VERSIONS = 100
+MAX_TRANSITIONS = 200  # el detalle completo queda en la auditoría (DT-28)
 
 
 class LifecycleError(DomainError):
@@ -51,6 +53,7 @@ class AgentVersion:
     sha256: str
     config_version: int  # campo `version` del archivo
     imported_at: datetime
+    approved: bool = False  # el propietario aprobó esta versión alguna vez
 
 
 @dataclass(frozen=True, slots=True)
@@ -152,14 +155,24 @@ def register_import(
         state=AgentState.BORRADOR,
         current=number,
         versions=(*versions, new_version),
-        history=(*(entry.history if entry is not None else ()), transition),
+        history=_with_transition(entry, transition) if entry is not None else (transition,),
     )
 
 
 def _was_approved(entry: RegistryEntry, number: int) -> bool:
     sha = entry.version(number).sha256
-    approved = {t.version for t in entry.history if t.action is LifecycleAction.APROBAR}
-    return any(entry.version(n).sha256 == sha for n in approved)
+    return any(v.approved and v.sha256 == sha for v in entry.versions)
+
+
+def _with_transition(entry: RegistryEntry, transition: Transition) -> tuple[Transition, ...]:
+    """Historial con la transición nueva, acotado a las últimas `MAX_TRANSITIONS`."""
+    return (*entry.history, transition)[-MAX_TRANSITIONS:]
+
+
+def _approve_current(entry: RegistryEntry) -> tuple[AgentVersion, ...]:
+    return tuple(
+        replace(v, approved=True) if v.number == entry.current else v for v in entry.versions
+    )
 
 
 def _target_state(entry: RegistryEntry, action: LifecycleAction) -> AgentState:
@@ -194,7 +207,7 @@ def _restore(entry: RegistryEntry, version: int | None, at: datetime) -> Registr
         raise LifecycleError(f"{entry.agent_id}: la v{version} ya es la versión actual")
     state = AgentState.APROBADO if _was_approved(entry, version) else AgentState.BORRADOR
     transition = Transition(at, LifecycleAction.RESTAURAR, state, version)
-    return replace(entry, state=state, current=version, history=(*entry.history, transition))
+    return replace(entry, state=state, current=version, history=_with_transition(entry, transition))
 
 
 def apply_action(
@@ -214,4 +227,7 @@ def apply_action(
         raise LifecycleError("la versión solo se indica al restaurar")
     state = _target_state(entry, action)
     transition = Transition(at, action, state, entry.current)
-    return replace(entry, state=state, history=(*entry.history, transition))
+    versions = _approve_current(entry) if action is LifecycleAction.APROBAR else entry.versions
+    return replace(
+        entry, state=state, versions=versions, history=_with_transition(entry, transition)
+    )

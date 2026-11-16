@@ -135,3 +135,62 @@ def test_tampered_hash_in_registry_is_rejected(tmp_path: Path) -> None:
 
     with pytest.raises(StateError, match=r"registro\.json"):
         JsonAgentRegistry(tmp_path).load()
+
+
+# --- Aprobación por versión y migración (F10-T03, DT-28) ----------------------------------------
+
+
+def test_round_trip_keeps_version_approval(tmp_path: Path) -> None:
+    entry = register_import(None, "universidad", "a" * 64, 1, T0)
+    for action in (LifecycleAction.PROBAR, LifecycleAction.APROBAR):
+        entry = apply_action(entry, action, T0)
+    store = JsonAgentRegistry(tmp_path)
+
+    store.save(entry)
+
+    loaded = JsonAgentRegistry(tmp_path).load()["universidad"]
+    assert loaded.versions[0].approved
+    assert loaded == entry
+
+
+def test_old_registry_without_approved_flag_derives_it_from_history(tmp_path: Path) -> None:
+    entry = register_import(None, "universidad", "a" * 64, 1, T0)
+    for action in (LifecycleAction.PROBAR, LifecycleAction.APROBAR):
+        entry = apply_action(entry, action, T0)
+    entry = register_import(entry, "universidad", "b" * 64, 2, T0)
+    JsonAgentRegistry(tmp_path).save(entry)
+    path = tmp_path / "registro.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    for version in raw["agentes"]["universidad"]["versions"]:
+        del version["approved"]  # formato de la Fase 8
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    loaded = JsonAgentRegistry(tmp_path).load()["universidad"]
+
+    assert [v.approved for v in loaded.versions] == [True, False]
+
+
+def test_approved_flag_must_be_a_boolean(tmp_path: Path) -> None:
+    JsonAgentRegistry(tmp_path).save(_entry())
+    path = tmp_path / "registro.json"
+    raw = json.loads(path.read_text(encoding="utf-8"))
+    raw["agentes"]["universidad"]["versions"][0]["approved"] = "sí"
+    path.write_text(json.dumps(raw), encoding="utf-8")
+
+    with pytest.raises(StateError, match="dañado"):
+        JsonAgentRegistry(tmp_path).load()
+
+
+def test_registry_stays_small_after_thousands_of_transitions(tmp_path: Path) -> None:
+    entry = register_import(None, "universidad", "a" * 64, 1, T0)
+    for action in (LifecycleAction.PROBAR, LifecycleAction.APROBAR, LifecycleAction.ACTIVAR):
+        entry = apply_action(entry, action, T0)
+    for _ in range(2_000):  # antes, ~20 000 transiciones superaban los 2 MiB y no cargaba
+        entry = apply_action(entry, LifecycleAction.DESACTIVAR, T0)
+        entry = apply_action(entry, LifecycleAction.ACTIVAR, T0)
+    store = JsonAgentRegistry(tmp_path)
+
+    store.save(entry)
+
+    assert (tmp_path / "registro.json").stat().st_size < 64 * 1024
+    assert store.load()["universidad"].state is AgentState.ACTIVO

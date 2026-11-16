@@ -2,6 +2,7 @@ import { useEffect, useState, type KeyboardEvent } from "react";
 import { checkSession, onSessionLost, postVoid, resetSession } from "./api/client";
 import { ViewBoundary } from "./components/ViewBoundary";
 import { AgentsView } from "./views/AgentsView";
+import { CalendarView } from "./views/CalendarView";
 import { HistoryView } from "./views/HistoryView";
 import { IndicatorsView } from "./views/IndicatorsView";
 import { OfficeView } from "./views/OfficeView";
@@ -16,6 +17,7 @@ const TABS = [
   { id: "tareas", label: "Tareas", View: TasksView },
   { id: "historial", label: "Historial", View: HistoryView },
   { id: "agentes", label: "Agentes", View: AgentsView },
+  { id: "calendario", label: "Calendario", View: CalendarView },
   { id: "indicadores", label: "Indicadores", View: IndicatorsView },
 ] as const;
 

@@ -51,12 +51,24 @@ def _sha256(raw: object) -> str:
     return raw
 
 
-def _version(raw: Any) -> AgentVersion:
+def _approved(raw: Any, number: int, legacy: frozenset[int]) -> bool:
+    """`approved` explícito, o deducido del historial en un registro anterior (DT-28)."""
+    if "approved" not in raw:
+        return number in legacy
+    value = raw["approved"]
+    if not isinstance(value, bool):
+        raise ValueError("'approved' debe ser true o false")
+    return value
+
+
+def _version(raw: Any, legacy: frozenset[int]) -> AgentVersion:
+    number = _positive_int(raw["number"])
     return AgentVersion(
-        number=_positive_int(raw["number"]),
+        number=number,
         sha256=_sha256(raw["sha256"]),
         config_version=_positive_int(raw["config_version"]),
         imported_at=_moment(raw["imported_at"]),
+        approved=_approved(raw, number, legacy),
     )
 
 
@@ -70,13 +82,15 @@ def _transition(raw: Any) -> Transition:
 
 
 def _entry(key: str, raw: Any) -> RegistryEntry:
-    versions = tuple(_version(item) for item in raw["versions"])
+    history = tuple(_transition(item) for item in raw["history"])
+    legacy = frozenset(t.version for t in history if t.action is LifecycleAction.APROBAR)
+    versions = tuple(_version(item, legacy) for item in raw["versions"])
     entry = RegistryEntry(
         agent_id=str(raw["agent_id"]),
         state=AgentState(raw["state"]),
         current=_positive_int(raw["current"]),
         versions=versions,
-        history=tuple(_transition(item) for item in raw["history"]),
+        history=history,
     )
     if entry.agent_id != key or not _SAFE_ID.fullmatch(key):
         raise ValueError("id incoherente")
@@ -98,6 +112,7 @@ def _dump(entry: RegistryEntry) -> dict[str, object]:
                 "sha256": v.sha256,
                 "config_version": v.config_version,
                 "imported_at": v.imported_at.isoformat(),
+                "approved": v.approved,
             }
             for v in entry.versions
         ],

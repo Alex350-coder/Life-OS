@@ -11,11 +11,14 @@ from lifeos.domain.area_proposals import (
     ProposalKind,
     ProposalRef,
     ProposalStatus,
+    item_signature,
     parse_proposal_note,
     proposal_area,
     proposal_note_path,
+    rejected_signatures,
     render_proposal,
     with_status,
+    without_rejected,
 )
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.ids import TaskId
@@ -207,3 +210,83 @@ def test_area_is_declared_in_header() -> None:
     assert proposal_area(render_proposal(_proposal())) is Area.UNIVERSIDAD
     assert proposal_area("# sin cabecera") is None
     assert proposal_area("[area:: salud] [fuente:: ia]") is None
+
+
+# --- Memoria de rechazos (F10-T02, DT-30) -------------------------------------------------------
+
+
+def _rej_new(key: str, title: str) -> ProposalItem:
+    return ProposalItem(
+        key,
+        ProposalKind.NUEVA_TAREA,
+        Priority.MEDIA,
+        "meta",
+        title=title,
+        effort=Effort.parse("1h"),
+    )
+
+
+def _rej_prio(key: str, task: str, priority: Priority) -> ProposalItem:
+    return ProposalItem(key, ProposalKind.PRIORIDAD, priority, "vence", task_id=TaskId(task))
+
+
+def test_signature_ignores_key_reason_status_case_and_spacing() -> None:
+    assert item_signature(_rej_new("p1", "Leer  Capítulo 3")) == item_signature(
+        _rej_new("p9", "leer capítulo 3")
+    )
+    assert item_signature(_rej_prio("p1", "t-abc234", Priority.ALTA)) != item_signature(
+        _rej_prio("p1", "t-abc234", Priority.BAJA)
+    )
+
+
+def test_rejected_signatures_only_count_rejected_items_of_that_area() -> None:
+    note = render_proposal(
+        AreaProposal(
+            "universidad",
+            Area.UNIVERSIDAD,
+            IsoWeek.parse("2026-W44"),
+            "heuristica",
+            (_rej_prio("p1", "t-abc234", Priority.ALTA), _rej_new("p2", "Leer")),
+        )
+    )
+    note = with_status(note, "p1", ProposalStatus.RECHAZADA)
+
+    assert rejected_signatures(note, Area.UNIVERSIDAD) == {
+        item_signature(_rej_prio("p1", "t-abc234", Priority.ALTA))
+    }
+    assert rejected_signatures(note, Area.PROYECTOS) == frozenset()
+    assert rejected_signatures("sin cabecera", Area.UNIVERSIDAD) == frozenset()
+
+
+def test_without_rejected_drops_matches_and_renumbers() -> None:
+    items = (_rej_new("p1", "A"), _rej_new("p2", "B"), _rej_new("p3", "C"))
+
+    kept, dropped = without_rejected(items, frozenset({item_signature(_rej_new("p9", "b"))}))
+
+    assert dropped == 1
+    assert [(i.key, i.title) for i in kept] == [("p1", "A"), ("p2", "C")]
+
+
+def test_new_task_signature_ignores_due_date_and_effort_on_purpose() -> None:
+    """Decisión de la Fase 10: rechazar «Leer» rechaza la idea esa semana, no una fecha o un
+    esfuerzo concretos; si no, el especialista podría insistir moviendo solo la fecha."""
+    first = ProposalItem(
+        "p1",
+        ProposalKind.NUEVA_TAREA,
+        Priority.MEDIA,
+        "meta",
+        title="Leer",
+        effort=Effort.parse("30m"),
+        due=date(2026, 11, 6),
+    )
+    moved = ProposalItem(
+        "p2",
+        ProposalKind.NUEVA_TAREA,
+        Priority.ALTA,
+        "meta",
+        title="Leer",
+        effort=Effort.parse("2h"),
+        due=date(2026, 11, 20),
+    )
+
+    assert item_signature(first) == item_signature(moved)

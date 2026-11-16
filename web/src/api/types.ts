@@ -314,3 +314,37 @@ export interface Indicators {
     unreadable_closings: number;
   };
 }
+
+// Google Calendar en solo lectura (F10-T04, DT-27). Conectar y publicar siguen en la CLI.
+export interface CalendarGrant {
+  grant: "lectura" | "escritura";
+  scope: string;
+  connected: boolean;
+  obtained: string | null;
+  problem: string | null;
+}
+
+export interface CalendarStatus {
+  configured: boolean;
+  grants: CalendarGrant[];
+  can_read: boolean;
+  problem: string | null; // configuración de Google rechazada, si la hay
+}
+
+export interface BusyInterval {
+  day: string;
+  span: string;
+  start: string;
+  end: string;
+  source: string;
+  confidence: "alta" | "media";
+}
+
+export interface CalendarAvailability {
+  week: string;
+  zone: string;
+  plan_path: string | null;
+  plan_status: string | null;
+  busy: BusyInterval[];
+  clashes: { block: PlanBlock; busy: BusyInterval }[];
+}

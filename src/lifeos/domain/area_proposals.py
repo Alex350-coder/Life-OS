@@ -11,7 +11,7 @@ a una línea inerte sin corchetes (SEC-10): un motivo no puede inyectar campos n
 """  # noqa: E501
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date
 from enum import StrEnum
 
@@ -274,3 +274,37 @@ def proposal_area(text: str) -> Area | None:
                 return None
             return area if area in SPECIALIST_AREAS else None
     return None
+
+
+# --- Memoria de rechazos (DT-30) ----------------------------------------------------------------
+
+Signature = tuple[str, str, str]
+
+
+def item_signature(item: ProposalItem) -> Signature:
+    """Qué propone un elemento, sin clave, motivo ni estado. Dos elementos con la misma firma
+    proponen lo mismo: el mismo cambio de prioridad en la misma tarea, o una tarea nueva con el
+    mismo título (sin distinguir mayúsculas ni espacios)."""
+    if item.kind is ProposalKind.PRIORIDAD:
+        return (str(item.kind), str(item.task_id), str(item.priority))
+    return (str(item.kind), " ".join((item.title or "").split()).casefold(), "")
+
+
+def rejected_signatures(text: str, area: Area) -> frozenset[Signature]:
+    """Firmas rechazadas en una nota de propuestas de `area`; otra área no cuenta."""
+    if proposal_area(text) is not area:
+        return frozenset()
+    return frozenset(
+        item_signature(item)
+        for item in parse_proposal_note(text)
+        if item.status is ProposalStatus.RECHAZADA
+    )
+
+
+def without_rejected(
+    items: tuple[ProposalItem, ...], rejected: frozenset[Signature]
+) -> tuple[tuple[ProposalItem, ...], int]:
+    """Quita lo ya rechazado y renumera las claves (p1, p2…). Devuelve cuántos quitó."""
+    kept = [item for item in items if item_signature(item) not in rejected]
+    renumbered = tuple(replace(item, key=f"p{n}") for n, item in enumerate(kept, start=1))
+    return renumbered, len(items) - len(kept)

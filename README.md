@@ -151,6 +151,7 @@ uv run lifeos-calendario revocar                       # revoca en Google y borr
 - **Lectura.** Solo intervalos ocupados de tu calendario principal, nunca títulos. `semana` los evita y los anota en `## Eventos externos` con la fuente y la confianza (*alta*; *media* si duran 12 h o más). `aprobar` los vuelve a leer: si Google no responde, no aprueba. Un evento marcado en Google como **Disponible** no bloquea tiempo: úsalo para recordatorios de todo el día.
 - **Escritura.** Solo los bloques de trabajo de un plan **aprobado**, en un calendario propio "Life OS". Nunca toca tus eventos. Republicar no duplica nada: lo que sobra se borra y lo cambiado a mano se restaura. Los bloques ya terminados no se crean ni se borran. La vista previa no escribe nada en Google y avisa si un bloque pisa ahora un evento.
 - **Permisos separados.** Cada `conectar` pide un único permiso. Si Google concede otros, el token se revoca y no se guarda. Los tokens viven en `~/.lifeos` (`LIFEOS_TOKENS_DIR`), fuera de este proyecto y de OneDrive.
+- **Web (solo lectura, Fase 10).** La pestaña Calendario muestra qué permisos están conectados y lo ocupado de la semana, con los choques con el plan. Conectar, publicar y revocar siguen solo aquí, en la CLI, porque necesitan el navegador, la vista previa y `--confirmar`. Si conectas la lectura con `lifeos-web` en marcha, reinícialo para verla.
 - **Revocar.** Google revoca los dos permisos juntos. Si quitas el acceso desde tu cuenta de Google, Life OS lo detecta en el siguiente uso y pide volver a conectar. En modo de pruebas, Google caduca el acceso a los 7 días: basta con volver a conectar.
 
 ## Especialistas y registro de agentes (Fase 8; ADR-0004 y ADR-0018)
@@ -168,7 +169,9 @@ uv run lifeos-agentes rechazar 2026-W46/universidad/p2
 uv run lifeos-agentes lista | desactivar <id> | restaurar <id> --version 1 | exportar <id> [--salida f.yaml]
 ```
 - **Importar no activa ni concede nada.** Lo que pida más que `config/permissions.yaml` rechaza el archivo entero con todos los motivos. Una versión nueva exige subir `version` y vuelve a borrador.
-- **Restaurar** recupera la copia exacta de una versión anterior. Si ya estaba aprobada, queda aprobada: basta con activarla.
+- **Aceptar es seguro de repetir.** La tarea creada lleva `[propuesta:: <semana>/<nota>/<clave>]`. Si la aceptación se corta entre crear la tarea y marcar la propuesta, repetirla solo marca la propuesta. Si alguna nota no se puede leer, aceptar se rechaza en lugar de arriesgarse a duplicar.
+- **Lo rechazado no vuelve.** Al ejecutar, un especialista no repite algo rechazado esa semana en su área: el mismo cambio de prioridad en la misma tarea, o una tarea nueva con el mismo título. Lo quitado se cuenta en una alerta. Si una nota de `Propuestas/<semana>/` no se puede leer, no escribe nada.
+- **Restaurar** recupera la copia exacta de una versión anterior. Si ya estaba aprobada, queda aprobada: basta con activarla. Cada versión guarda su aprobación, y `registro.json` conserva las últimas 200 transiciones (el detalle completo está en la auditoría).
 - **Estado** en `state/agentes/` (`LIFEOS_STATE_DIR`): `registro.json` y una copia `vN.yaml` por versión. Antes de usar o exportar una copia se comprueba su sha256. Un candado entre procesos evita que la CLI y la web se pisen.
 - **Metas** por área en `<área>/metas.md`: `- [meta:: m1] Título [horizonte:: AAAA-MM-DD] [estado:: activa]`. Una tarea se enlaza con `[meta:: m1]`.
 - **Web:** pestaña Agentes, con importar o editar, probar, aprobar, activar, desactivar, restaurar, exportar, ejecutar y el panel de propuestas.

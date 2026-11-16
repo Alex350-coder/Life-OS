@@ -54,6 +54,10 @@ class WebRuntime:
     def base(self) -> Runtime:
         return self._base
 
+    @property
+    def settings(self) -> Settings:
+        return self._settings
+
     def runtime(self, *, use_ai: bool) -> Runtime:
         if not use_ai:
             return self._base

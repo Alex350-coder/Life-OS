@@ -21,6 +21,7 @@ from lifeos.application.permissions import (
 from lifeos.application.specialists import AiAreaDrafter, SpecialistRunner
 from lifeos.domain.agent_lifecycle import AgentState, LifecycleAction
 from lifeos.domain.area_proposals import ProposalKind, parse_proposal_note
+from lifeos.domain.ids import TaskId
 from lifeos.domain.task import Priority
 from lifeos.domain.weeks import IsoWeek
 from lifeos.ports.config import AgentConfig
@@ -40,6 +41,7 @@ TASKS = (
     f" {DUE} 2026-11-03\n"
 )
 GOALS = "- [meta:: m1] Aprobar Redes [horizonte:: 2026-12-15]\n"
+HEADER = "[area:: {}] [fuente:: heuristica]\n"
 
 
 def _validate(agent: AgentConfig) -> EffectivePermissions:
@@ -229,3 +231,108 @@ def test_ai_failure_falls_back_to_heuristic(
     assert result.proposal.source == "heuristica"
     assert any("IA" in alert for alert in result.alerts)
     assert result.proposal.items
+
+
+# --- Memoria de rechazos (F10-T02, DT-30) -------------------------------------------------------
+
+
+def _reject_all(vault: FilesystemVault, path: str) -> None:
+    from lifeos.domain.area_proposals import ProposalStatus, with_status
+    from lifeos.ports.vault import VaultPath
+
+    target = VaultPath(path)
+    text = vault.read(target).text
+    for item in parse_proposal_note(text):
+        text = with_status(text, item.key, ProposalStatus.RECHAZADA)
+    vault.write(target, text, expected=vault.read(target).version)
+
+
+def test_rejected_items_are_not_proposed_again_the_same_week(
+    registry: AgentRegistry, area_vault: FilesystemVault, audit: MemoryAuditLog
+) -> None:
+    runner = _runner(registry, area_vault, audit)
+    _activate(registry, runner)
+    first = runner.run("universidad", week=WEEK)
+    assert first.path is not None
+    _reject_all(area_vault, str(first.path))
+
+    second = runner.run("universidad", week=WEEK)
+
+    assert second.path is None  # todo estaba rechazado: no se escribe otra nota
+    assert second.proposal.items == ()
+    assert second.repeated_rejections == len(first.proposal.items)
+    assert any("ya rechazadas" in alert for alert in second.alerts)
+
+
+def test_only_matching_rejections_are_dropped_and_keys_renumbered(
+    registry: AgentRegistry,
+    area_vault: FilesystemVault,
+    audit: MemoryAuditLog,
+    write_note: WriteNote,
+) -> None:
+    write_note(
+        "Propuestas/2026-W44/otro.md",
+        "[area:: universidad] [fuente:: heuristica]\n"
+        "- [propuesta:: p1] [tipo:: prioridad] [tarea:: t-abc234] [prioridad:: alta]"
+        " [estado:: rechazada] vence pronto\n"
+        "- [propuesta:: p2] [tipo:: nueva_tarea] [titulo:: Siguiente paso: aprobar  redes]"
+        " [esfuerzo:: 1h] [prioridad:: media] [estado:: aceptada] meta m1\n",
+    )
+    runner = _runner(registry, area_vault, audit)
+    _activate(registry, runner)
+
+    result = runner.run("universidad", week=WEEK)
+
+    kept = result.proposal.items
+    assert TaskId("t-abc234") not in {i.task_id for i in kept}  # rechazada: no vuelve
+    assert any(i.kind is ProposalKind.NUEVA_TAREA for i in kept)  # aceptada no cuenta
+    assert [i.key for i in kept] == [f"p{n}" for n in range(1, len(kept) + 1)]
+    assert result.repeated_rejections == 1
+
+
+def test_rejections_of_another_area_or_week_do_not_count(
+    registry: AgentRegistry,
+    area_vault: FilesystemVault,
+    audit: MemoryAuditLog,
+    write_note: WriteNote,
+) -> None:
+    rejected = (
+        "- [propuesta:: p1] [tipo:: prioridad] [tarea:: t-abc234] [prioridad:: alta]"
+        " [estado:: rechazada] vence pronto\n"
+    )
+    write_note("Propuestas/2026-W43/universidad.md", HEADER.format("universidad") + rejected)
+    write_note("Propuestas/2026-W44/proyectos.md", HEADER.format("proyectos") + rejected)
+
+    result = _runner(registry, area_vault, audit).run("universidad", week=WEEK, dry_run=True)
+
+    assert TaskId("t-abc234") in {i.task_id for i in result.proposal.items}
+    assert result.repeated_rejections == 0
+
+
+def test_unreadable_proposal_note_stops_the_write_and_names_the_note(
+    registry: AgentRegistry,
+    area_vault: FilesystemVault,
+    audit: MemoryAuditLog,
+    write_note: WriteNote,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from lifeos.ports.vault import Snapshot, VaultIOError, VaultPath
+
+    write_note("Propuestas/2026-W44/otro.md", HEADER.format("universidad"))
+    runner = _runner(registry, area_vault, audit)
+    _activate(registry, runner)
+    original = area_vault.read
+
+    def flaky(path: VaultPath) -> Snapshot:
+        if path.value == "Propuestas/2026-W44/otro.md":
+            raise VaultIOError("bloqueada")
+        return original(path)
+
+    monkeypatch.setattr(area_vault, "read", flaky)
+
+    result = runner.run("universidad", week=WEEK)
+
+    assert result.path is None  # no se arriesga a repetir un rechazo
+    assert any("Propuestas/2026-W44/otro.md" in alert for alert in result.alerts)
+    monkeypatch.undo()
+    assert all("universidad" not in str(p) for p in area_vault.list_notes(VaultPath("Propuestas")))

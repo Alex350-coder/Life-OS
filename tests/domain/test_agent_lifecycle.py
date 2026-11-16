@@ -5,6 +5,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from lifeos.domain.agent_lifecycle import (
+    MAX_TRANSITIONS,
     AgentState,
     LifecycleAction,
     LifecycleError,
@@ -214,3 +215,41 @@ def test_retesting_a_tested_draft_is_allowed() -> None:
 def test_activating_an_active_agent_is_rejected() -> None:
     with pytest.raises(LifecycleError, match="ya está activo"):
         apply_action(_active(), LifecycleAction.ACTIVAR, T0)
+
+
+# --- Historial acotado y aprobación por versión (F10-T03, DT-28) --------------------------------
+
+
+def _cycled(times: int) -> RegistryEntry:
+    """Agente activo que se desactiva y reactiva `times` veces."""
+    entry = _active()
+    for n in range(times):
+        at = T0 + timedelta(minutes=n + 1)
+        entry = apply_action(entry, LifecycleAction.DESACTIVAR, at)
+        entry = apply_action(entry, LifecycleAction.ACTIVAR, at)
+    return entry
+
+
+def test_history_is_bounded_to_the_latest_transitions() -> None:
+    entry = _cycled(MAX_TRANSITIONS)  # 4 + 2·MAX transiciones
+
+    assert len(entry.history) == MAX_TRANSITIONS
+    assert entry.history[-1].action is LifecycleAction.ACTIVAR
+    assert entry.state is AgentState.ACTIVO
+
+
+def test_approval_survives_history_trimming() -> None:
+    entry = _cycled(MAX_TRANSITIONS)
+    assert all(t.action is not LifecycleAction.APROBAR for t in entry.history)  # ya no está
+    entry = register_import(entry, "universidad", SHA_B, 2, T0)
+
+    restored = apply_action(entry, LifecycleAction.RESTAURAR, T0, version=1)
+
+    assert restored.state is AgentState.APROBADO  # la v1 sigue aprobada
+    assert apply_action(restored, LifecycleAction.ACTIVAR, T0).state is AgentState.ACTIVO
+
+
+def test_approving_marks_only_the_current_version() -> None:
+    entry = register_import(_active(), "universidad", SHA_B, 2, T0)
+
+    assert [v.approved for v in entry.versions] == [True, False]

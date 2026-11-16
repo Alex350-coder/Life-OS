@@ -27,8 +27,14 @@ from lifeos.application.llm_calls import CallContext, ModelGateway, UsageNotReco
 from lifeos.application.tasks import ApplicationError, TaskQuery
 from lifeos.application.tools import ActorContext, ToolRegistry
 from lifeos.domain.agent_lifecycle import AgentState
-from lifeos.domain.area_proposals import AreaProposal, ProposalItem
-from lifeos.domain.areas import goals_note
+from lifeos.domain.area_proposals import (
+    AreaProposal,
+    ProposalItem,
+    Signature,
+    rejected_signatures,
+    without_rejected,
+)
+from lifeos.domain.areas import PROPOSALS_ROOT, goals_note
 from lifeos.domain.errors import ValidationError
 from lifeos.domain.goals import MAX_GOALS, GoalsReport, parse_goals
 from lifeos.domain.horario_note import HORARIO_NOTE
@@ -41,7 +47,7 @@ from lifeos.ports.clock import Clock
 from lifeos.ports.config import AgentConfig
 from lifeos.ports.llm import ChatMessage, LlmError, OutputSchema
 from lifeos.ports.logs import AuditLog, AuditRecord, AuditResult
-from lifeos.ports.vault import NoteNotFoundError, VaultPath, VaultStore
+from lifeos.ports.vault import NoteNotFoundError, VaultIOError, VaultPath, VaultStore
 
 RITUAL = "propuesta_area"
 MAX_PROMPT_TITLE_CHARS = 120
@@ -95,6 +101,7 @@ class SpecialistResult:
     dry_run: bool
     recorded_test: bool
     alerts: tuple[str, ...]
+    repeated_rejections: int = 0  # elementos quitados por estar ya rechazados esa semana
 
 
 @dataclass(frozen=True, slots=True)
@@ -234,6 +241,23 @@ class SpecialistRunner:
         items = with_urgent_floor(kept, heuristic)
         return _Drafted(items, "ia", _discard_alert(discarded), ai_failed=False)
 
+    def _rejected(self, area: Area, week: IsoWeek) -> tuple[frozenset[Signature], tuple[str, ...]]:
+        """Lo rechazado esa semana en el área (DT-30) y las notas que no se pudieron leer. Lo
+        lee el código del sistema, no el agente: su permiso sigue siendo solo su carpeta
+        (ADR-0018)."""
+        try:
+            notes = self._vault.list_notes(VaultPath(f"{PROPOSALS_ROOT}/{week}"))
+        except NoteNotFoundError:
+            return frozenset(), ()
+        found: set[Signature] = set()
+        unreadable: list[str] = []
+        for path in notes:
+            try:
+                found |= rejected_signatures(self._vault.read(path).text, area)
+            except (NoteNotFoundError, VaultIOError):
+                unreadable.append(str(path))
+        return frozenset(found), tuple(sorted(unreadable))
+
     def _audit_fallback(self, agent_id: str, correlation: str) -> None:
         self._audit.append(
             AuditRecord(
@@ -274,16 +298,25 @@ class SpecialistRunner:
         alerts += drafted.alerts
         if context.goals.problems:
             alerts += (f"{context.goals.problems} líneas de metas no se entendieron",)
-        proposal = AreaProposal(agent_id, context.area, context.week, drafted.source, drafted.items)
+        rejected, unreadable = self._rejected(context.area, context.week)
+        items, repeated = without_rejected(drafted.items, rejected)
+        if unreadable:
+            alerts += (
+                f"no se pudieron leer {', '.join(unreadable)}: no se escribe nada hasta poder "
+                "comprobar lo ya rechazado",
+            )
+        if repeated:
+            alerts += (f"{repeated} propuestas ya rechazadas esta semana no se repiten",)
+        proposal = AreaProposal(agent_id, context.area, context.week, drafted.source, items)
         if dry_run:
             recorded, note = self._finish_test(agent_id, config.source_sha256, drafted)
             if note is not None:
                 alerts += (note,)
-            return SpecialistResult(proposal, None, True, recorded, alerts)
-        if not drafted.items:
-            return SpecialistResult(proposal, None, False, False, alerts)
+            return SpecialistResult(proposal, None, True, recorded, alerts, repeated)
+        if not items or unreadable:  # sin saber qué se rechazó, no se escribe (falla cerrado)
+            return SpecialistResult(proposal, None, False, False, alerts, repeated)
         # La llamada al modelo puede tardar: si se desactivó o la política cambió, no se escribe.
         _, current = self._registry.runnable(agent_id)
         tools = ToolRegistry(self._vault, {agent_id: current}, self._audit, self._clock)
         path = tools.proponer_al_jefe(actor, proposal)
-        return SpecialistResult(proposal, path, False, False, alerts)
+        return SpecialistResult(proposal, path, False, False, alerts, repeated)
