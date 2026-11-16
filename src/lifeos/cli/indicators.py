@@ -14,6 +14,7 @@ from typing import NoReturn, TextIO
 from lifeos.application.indicator_report import IndicatorReport, measure_indicators
 from lifeos.application.indicators import DEFAULT_WINDOW_DAYS, MAX_WINDOW_DAYS
 from lifeos.bootstrap import STARTUP_ERRORS, Settings, build_runtime
+from lifeos.cli.output import console
 from lifeos.domain.errors import LifeOSError
 from lifeos.domain.text import printable
 from lifeos.ports.clock import Clock
@@ -114,7 +115,7 @@ def main(
     err: TextIO | None = None,
     clock: Clock | None = None,
 ) -> int:
-    stdout, stderr = out or sys.stdout, err or sys.stderr
+    stdout, stderr = out or console(sys.stdout), err or console(sys.stderr)
     try:
         args = _parser().parse_args(argv)
     except UsageError as error:

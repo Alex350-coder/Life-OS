@@ -20,6 +20,7 @@ from lifeos.bootstrap import (
     backup_dir,
     vault_backup,
 )
+from lifeos.cli.output import console
 from lifeos.domain.text import printable
 from lifeos.ports.backup import BackupError, BackupInfo, VaultBackup
 
@@ -60,7 +61,7 @@ def main(
     backup: VaultBackup | None = None,
     now: datetime | None = None,
 ) -> int:
-    stdout, stderr = out or sys.stdout, err or sys.stderr
+    stdout, stderr = out or console(sys.stdout), err or console(sys.stderr)
     args = _parser().parse_args(argv)
     try:
         settings = Settings.from_env(project_root, environ)

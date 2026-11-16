@@ -285,13 +285,6 @@ def _runtime(
     return build_runtime(settings, with_llm=with_llm, clock=clock)
 
 
-def _utf8(stream: TextIO) -> TextIO:
-    reconfigure = getattr(stream, "reconfigure", None)
-    if reconfigure is not None:  # consola de Windows: evita errores con "–" o acentos
-        reconfigure(encoding="utf-8", errors="replace")
-    return stream
-
-
 def main(
     argv: Sequence[str] | None = None,
     *,
@@ -301,8 +294,8 @@ def main(
     out: TextIO | None = None,
     err: TextIO | None = None,
 ) -> int:
-    stdout = out or _utf8(sys.stdout)
-    stderr = err or _utf8(sys.stderr)
+    stdout = out or output.console(sys.stdout)
+    stderr = err or output.console(sys.stderr)
     try:
         args = build_parser().parse_args(argv)
         runtime = _runtime(args, environ, project_root, clock)

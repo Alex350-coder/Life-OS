@@ -23,6 +23,7 @@ from zoneinfo import ZoneInfo
 from lifeos.application.calendar_publication import CalendarPreview, CalendarPublisher
 from lifeos.application.jefe import ExternalView
 from lifeos.bootstrap import STARTUP_ERRORS, Settings, build_runtime, calendar_access
+from lifeos.cli.output import console
 from lifeos.domain.errors import LifeOSError
 from lifeos.domain.text import printable
 from lifeos.domain.weeks import IsoWeek
@@ -169,7 +170,7 @@ def main(
     open_browser: Callable[[str], object] | None = None,
     clock: Clock | None = None,
 ) -> int:
-    stdout, stderr = out or sys.stdout, err or sys.stderr
+    stdout, stderr = out or console(sys.stdout), err or console(sys.stderr)
     try:
         args = _parser().parse_args(argv)
         week = _week(getattr(args, "semana", None))

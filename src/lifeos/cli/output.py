@@ -1,6 +1,7 @@
 """Formato de salida de la CLI: solo presenta resultados de los casos de uso."""
 
 from collections.abc import Iterable
+from typing import TextIO
 from zoneinfo import ZoneInfo
 
 from lifeos.application.closing import ClosingPreview, ClosingResult
@@ -12,6 +13,14 @@ from lifeos.domain.adjustments import adjustment_entry
 from lifeos.domain.closing import AnswerKind, TaskChange
 from lifeos.domain.coach import block_span
 from lifeos.domain.plan import Block, BlockKind, PlanProposal, PlanStatus
+
+
+def console(stream: TextIO) -> TextIO:
+    """Pasa la consola a UTF-8 con reemplazo: la de Windows (cp1252) no tiene "→" ni "–"."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8", errors="replace")
+    return stream
 
 
 def tasks(located: Iterable[LocatedTask]) -> list[str]:
