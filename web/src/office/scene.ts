@@ -1,10 +1,14 @@
 // Estado de la oficina (docs/specs/interfaz-grafica.md): una función pura que traduce los datos
 // reales de la API en lo que se dibuja. La escena no inventa nada ni decide nada: solo muestra.
 import type { Agent, Briefing, PlanBlock } from "../api/types";
+import { pauseFor, type Pause } from "./pause";
+import { seasonAt, type Season } from "./season";
 
 export type Light = "noche" | "amanecer" | "dia" | "atardecer";
 export type Pose = "trabajando" | "descansando" | "esperando" | "pensando";
 export type Tab = "hoy" | "semana" | "tareas" | "historial" | "agentes";
+
+const DEFAULT_ZONE = "America/Lima"; // solo para decorar mientras no llegan los datos del día
 
 export interface Character {
   id: string;
@@ -22,6 +26,8 @@ export interface Scene {
   characters: Character[];
   progress: { done: number; total: number }; // minutos de trabajo ya pasados / del día
   headline: string;
+  season: Season;
+  pause: Pause | null; // paseo y charla en el tiempo libre (F9-T04)
 }
 
 const NIGHT_END = 6;
@@ -42,7 +48,7 @@ function short(text: string): string {
   return text.length <= MAX_BUBBLE ? text : `${text.slice(0, MAX_BUBBLE - 1)}…`;
 }
 
-function workDone(work: PlanBlock[], now: Date): { done: number; total: number } {
+export function workDone(work: PlanBlock[], now: Date): { done: number; total: number } {
   let done = 0;
   let total = 0;
   for (const block of work) {
@@ -123,5 +129,6 @@ export function buildScene(day: Briefing | null, agents: Agent[], now: Date): Sc
     day === null ? "Cargando la oficina…"
     : progress.total === 0 ? `Hoy ${day.day}: sin bloques de trabajo`
     : `Hoy ${day.day}: ${Math.round((progress.done / progress.total) * 100)} % del trabajo del día`;
-  return { light: lightAt(now.getHours()), characters, progress, headline };
+  const season = seasonAt(now, day?.zone ?? DEFAULT_ZONE);
+  return { light: lightAt(now.getHours()), characters, progress, headline, season, pause: pauseFor(day, characters) };
 }

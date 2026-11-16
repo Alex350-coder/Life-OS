@@ -3,6 +3,7 @@ import { checkSession, onSessionLost, postVoid, resetSession } from "./api/clien
 import { ViewBoundary } from "./components/ViewBoundary";
 import { AgentsView } from "./views/AgentsView";
 import { HistoryView } from "./views/HistoryView";
+import { IndicatorsView } from "./views/IndicatorsView";
 import { OfficeView } from "./views/OfficeView";
 import { TasksView } from "./views/TasksView";
 import { TodayView } from "./views/TodayView";
@@ -15,6 +16,7 @@ const TABS = [
   { id: "tareas", label: "Tareas", View: TasksView },
   { id: "historial", label: "Historial", View: HistoryView },
   { id: "agentes", label: "Agentes", View: AgentsView },
+  { id: "indicadores", label: "Indicadores", View: IndicatorsView },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];

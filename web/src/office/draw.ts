@@ -1,5 +1,8 @@
 // Dibujo de la oficina en un canvas 2D: pixel art generado por código (inspirado en Habblaud),
 // sin imágenes externas ni dependencias (CSP de ADR-0013). Paleta de DESIGN.md.
+import { drawSeason, rect, sparkle } from "./decor";
+import { currentLine, walkPhase } from "./pause";
+import type { Reaction } from "./reactions";
 import type { Character, Light, Pose, Scene } from "./scene";
 
 export const WIDTH = 640;
@@ -53,11 +56,6 @@ function deskY(desk: number): number {
   return DESK_Y + Math.floor(desk / 4) * 70;
 }
 
-function rect(ctx: CanvasRenderingContext2D, color: string, x: number, y: number, w: number, h: number) {
-  ctx.fillStyle = color;
-  ctx.fillRect(Math.round(x), Math.round(y), Math.round(w), Math.round(h));
-}
-
 function room(ctx: CanvasRenderingContext2D, light: Light, frame: number) {
   rect(ctx, COLORS.void, 0, 0, WIDTH, HEIGHT);
   rect(ctx, COLORS.graphite, 0, 0, WIDTH, WALL_BOTTOM);
@@ -86,8 +84,7 @@ function room(ctx: CanvasRenderingContext2D, light: Light, frame: number) {
   // Zona de descanso: sofá y planta.
   rect(ctx, COLORS.lavender, LOUNGE_X, 250, 100, 26);
   rect(ctx, "#b9b3e6", LOUNGE_X, 236, 100, 16);
-  rect(ctx, COLORS.wood, 600, 170, 20, 26);
-  rect(ctx, "#3f7a4a", 594, 140, 32, 34);
+  rect(ctx, COLORS.wood, 600, 170, 20, 26); // maceta; las hojas dependen de la estación
   // Luz cálida de noche.
   if (light === "noche" || light === "atardecer") {
     ctx.fillStyle = "rgba(255, 186, 106, 0.06)";
@@ -111,7 +108,16 @@ function desk(ctx: CanvasRenderingContext2D, x: number, y: number, glowing: bool
   rect(ctx, COLORS.smoke, x + 45, y - 8, 6, 8);
 }
 
-function person(ctx: CanvasRenderingContext2D, c: Character, x: number, y: number, pose: Pose, frame: number, index: number) {
+function person(
+  ctx: CanvasRenderingContext2D,
+  c: Character,
+  x: number,
+  y: number,
+  pose: Pose,
+  frame: number,
+  index: number,
+  stepping = false,
+) {
   const bob = pose === "esperando" || pose === "pensando" ? (Math.floor(frame / 15) % 2) * PX * 0.5 : 0;
   const top = y - 14 * PX + bob;
   const shirt = SHIRT[c.id] ?? COLORS.lavender;
@@ -125,8 +131,10 @@ function person(ctx: CanvasRenderingContext2D, c: Character, x: number, y: numbe
     rect(ctx, COLORS.skin, x - PX, top + (typing ? 7 : 8) * PX, PX, PX);
     rect(ctx, COLORS.skin, x + 6 * PX, top + (typing ? 8 : 7) * PX, PX, PX);
   }
-  rect(ctx, COLORS.smoke, x + PX, top + 10 * PX, 2 * PX, 4 * PX);
-  rect(ctx, COLORS.smoke, x + 3 * PX, top + 10 * PX, 2 * PX, 4 * PX);
+  // Al caminar, las piernas se alternan cada 4 fotogramas.
+  const stride = stepping ? (Math.floor(frame / 4) % 2 === 0 ? PX : -PX) / 2 : 0;
+  rect(ctx, COLORS.smoke, x + PX, top + 10 * PX + stride, 2 * PX, 4 * PX - Math.abs(stride));
+  rect(ctx, COLORS.smoke, x + 3 * PX, top + 10 * PX - stride, 2 * PX, 4 * PX - Math.abs(stride));
 }
 
 function bubble(ctx: CanvasRenderingContext2D, text: string, x: number, y: number, thinking: boolean, frame: number) {
@@ -161,25 +169,77 @@ function progressBar(ctx: CanvasRenderingContext2D, done: number, total: number,
   ctx.fillText(clock, 440, 40);
 }
 
+interface Spot {
+  x: number;
+  y: number;
+  seated: boolean;
+}
+
+const SOFA_Y = 250;
+const SEAT_GAP = 30;
+
+function seat(index: number): Spot {
+  return { x: LOUNGE_X + 8 + index * SEAT_GAP, y: SOFA_Y, seated: true };
+}
+
+function atDesk(c: Character): Spot {
+  return { x: deskX(c.desk) + 30, y: deskY(c.desk) + (c.pose === "trabajando" ? 10 : 30), seated: false };
+}
+
+function between(from: Spot, to: Spot, t: number): Spot {
+  return { x: from.x + (to.x - from.x) * t, y: from.y + (to.y - from.y) * t, seated: t >= 1 };
+}
+
+// Dónde está cada personaje en este fotograma: en su puesto, en el sofá o de camino.
+function spots(scene: Scene, frame: number): Map<string, Spot> {
+  const result = new Map<string, Spot>();
+  let seats = 0;
+  for (const c of scene.characters) {
+    if (c.pose === "descansando") result.set(c.id, seat(seats++));
+  }
+  const walkers = scene.pause?.walkers ?? [];
+  const progress = walkPhase(frame).progress;
+  for (const c of scene.characters) {
+    if (result.has(c.id)) continue;
+    result.set(c.id, walkers.includes(c.id) ? between(atDesk(c), seat(seats++), progress) : atDesk(c));
+  }
+  return result;
+}
+
+function said(scene: Scene, c: Character, frame: number, reactions: Reaction[]): string | null {
+  const reaction = reactions.find((r) => r.who === c.id);
+  if (reaction !== undefined) return reaction.text;
+  if (scene.pause?.walkers.includes(c.id) === true) {
+    const line = currentLine(scene.pause, frame);
+    return line?.who === c.id ? line.text : null; // de camino o escuchando: sin globo
+  }
+  return c.bubble;
+}
+
 // Dibuja un fotograma y devuelve dónde está cada personaje (para el clic).
-export function drawOffice(ctx: CanvasRenderingContext2D, scene: Scene, frame: number, clock: string): HitBox[] {
+export function drawOffice(
+  ctx: CanvasRenderingContext2D,
+  scene: Scene,
+  frame: number,
+  clock: string,
+  reactions: Reaction[],
+): HitBox[] {
   ctx.imageSmoothingEnabled = false;
   room(ctx, scene.light, frame);
+  drawSeason(ctx, scene.season, frame);
   progressBar(ctx, scene.progress.done, scene.progress.total, clock);
+  const where = spots(scene, frame);
   const hits: HitBox[] = [];
-  let resting = 0;
   scene.characters.forEach((c, index) => {
-    const dx = deskX(c.desk);
-    const dy = deskY(c.desk);
-    desk(ctx, dx, dy, c.pose === "trabajando", frame + index * 9);
-    const onSofa = c.pose === "descansando";
-    const x = onSofa ? LOUNGE_X + 8 + resting * 30 : dx + 30;
-    const y = onSofa ? 250 : dy + (c.pose === "trabajando" ? 10 : 30);
-    if (onSofa) resting += 1;
-    person(ctx, c, x, y, c.pose, frame, index);
-    nameTag(ctx, c.name, x - 2, y + 14);
-    bubble(ctx, c.bubble, x + 12, y - 14 * PX - 30, c.pose === "pensando", frame);
-    hits.push({ id: c.id, x: x - 10, y: y - 14 * PX - 30, w: 50, h: 14 * PX + 50 });
+    desk(ctx, deskX(c.desk), deskY(c.desk), c.pose === "trabajando", frame + index * 9);
+    const spot = where.get(c.id) ?? atDesk(c);
+    const out = scene.pause?.walkers.includes(c.id) === true && walkPhase(frame).progress > 0;
+    person(ctx, c, spot.x, spot.y, out ? "esperando" : c.pose, frame, index, out && !spot.seated);
+    nameTag(ctx, c.name, spot.x - 2, spot.y + 14);
+    const text = said(scene, c, frame, reactions);
+    if (text !== null) bubble(ctx, text, spot.x + 12, spot.y - 14 * PX - 30, c.pose === "pensando", frame);
+    if (reactions.some((r) => r.who === c.id)) sparkle(ctx, spot.x + 12, spot.y - 7 * PX, frame);
+    hits.push({ id: c.id, x: spot.x - 10, y: spot.y - 14 * PX - 30, w: 50, h: 14 * PX + 50 });
   });
   return hits;
 }

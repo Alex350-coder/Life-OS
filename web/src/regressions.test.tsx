@@ -190,7 +190,7 @@ describe("App", () => {
     render(<App />);
     (await screen.findByRole("tab", { name: "Hoy" })).focus();
     await user.keyboard("{End}");
-    expect(screen.getByRole("tab", { name: "Agentes" })).toHaveFocus();
+    expect(screen.getByRole("tab", { name: "Indicadores" })).toHaveFocus();
     await user.keyboard("{Home}");
     expect(screen.getByRole("tab", { name: "Hoy" })).toHaveFocus();
   });

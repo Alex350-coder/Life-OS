@@ -188,3 +188,16 @@ fieldset.plain { border: 0; padding: 0; margin: 0; min-width: 0; }
   position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
   overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; border: 0;
 }
+
+/* --- Indicadores (F9-T03) ------------------------------------------------------------------ */
+.stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: var(--space); margin: var(--space) 0; }
+.stat { background: var(--carbon); border: 1px solid var(--edge); border-radius: var(--radius-small); padding: 12px var(--space); }
+.stat dt { color: var(--mist); font-size: 13px; }
+.stat dd { margin: 4px 0 0; }
+.stat dd strong { font-size: 22px; color: var(--snow); }
+
+/* --- Oficina: Mi día y eventos (F9-T04) ------------------------------------------------------ */
+.my-day { margin-top: var(--space); }
+.my-day-progress { display: grid; gap: 6px; }
+.my-day progress { width: 100%; height: 10px; accent-color: #99d2ec; }
+.office-event { min-height: 1.4em; color: var(--amber); margin: 8px 0 0; }
