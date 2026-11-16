@@ -46,6 +46,8 @@ from lifeos.ports.vault import NoteNotFoundError, VaultPath, VaultStore, Version
 OWNER_ACTOR = "propietario"
 NEW_TASKS_NOTE = "tareas.md"
 _NOTE_DEPTH = 3
+# La plantilla de la bóveda documenta la carpeta: no es una nota de propuestas.
+_FOLDER_README = PROPOSALS_ROOT.join(VaultPath("README.md"))
 _CLOSED = frozenset({TaskStatus.COMPLETADA, TaskStatus.CANCELADA})
 
 
@@ -115,7 +117,8 @@ class ProposalReview:
             notes = self._vault.list_notes(prefix)
         except NoteNotFoundError:
             return ()
-        return tuple(sorted((n for n in notes if n.name.endswith(".md")), key=lambda n: n.value))
+        found = (n for n in notes if n.name.endswith(".md") and n != _FOLDER_README)
+        return tuple(sorted(found, key=lambda n: n.value))
 
     def _review_item(self, ref: ProposalRef, area: Area | None, item: ProposalItem) -> ReviewItem:
         title = priority = None

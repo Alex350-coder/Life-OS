@@ -172,7 +172,8 @@ def render_proposal(proposal: AreaProposal) -> str:
         "",
         f"[area:: {proposal.area}] [fuente:: {proposal.source}]",
         "",
-        "> Estas propuestas no cambian nada hasta que las aceptes (`lifeos propuestas` o la web).",
+        "> Estas propuestas no cambian nada hasta que las aceptes"
+        " (`lifeos-agentes propuestas` o la web).",
         "",
         *(_render_item(item) for item in proposal.items),
     ]
