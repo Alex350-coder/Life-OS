@@ -1,7 +1,11 @@
+import { useState } from "react";
 import { get } from "../api/client";
 import type { Agent, Agents, Grant } from "../api/types";
 import { useApi } from "../api/useApi";
 import { ErrorBanner, Loading } from "../components/common";
+import { ImportedAgentCard } from "./agents/ImportedAgentCard";
+import { ImportForm } from "./agents/ImportForm";
+import { ProposalsPanel } from "./agents/ProposalsPanel";
 
 function grant(item: Grant): string {
   return `${item.root} (${item.mode}${item.section !== null ? `: ${item.section}` : ""})`;
@@ -51,16 +55,26 @@ function AgentCard({ agent }: { agent: Agent }) {
 
 export function AgentsView() {
   const agents = useApi(() => get<Agents>("/api/agentes"), "agentes");
+  // Tras aceptar, importar o ejecutar se recargan los agentes y las propuestas.
+  const [changes, setChanges] = useState(0);
   const data = agents.data;
+  const imported = data?.imported ?? [];
+
+  function changed() {
+    setChanges((n) => n + 1);
+    agents.reload();
+  }
+
   return (
     <div className="view">
       <section aria-labelledby="agents-heading" className="card">
-        <h2 id="agents-heading">Agentes (solo lectura)</h2>
+        <h2 id="agents-heading">Agentes</h2>
         <p className="muted">
-          Permisos efectivos = lo que pide cada agente ∩ tu política. El alta y la edición llegan en la Fase 8.
+          Permisos efectivos = lo que pide cada agente ∩ tu política. Jefe y Coach son el núcleo; los
+          especialistas se importan, se prueban, se aprueban y se activan aquí.
         </p>
         <ErrorBanner error={agents.error} />
-        <Loading loading={agents.loading}>
+        <Loading loading={agents.loading && data === null}>
           {data !== null && (
             <>
               <p>
@@ -73,10 +87,17 @@ export function AgentsView() {
               {data.agents.map((agent) => (
                 <AgentCard key={agent.id} agent={agent} />
               ))}
+              <h3>Especialistas importados</h3>
+              {imported.length === 0 && <p className="muted">Aún no has importado ningún agente.</p>}
+              {imported.map((agent) => (
+                <ImportedAgentCard key={agent.id} agent={agent} onChanged={changed} />
+              ))}
             </>
           )}
         </Loading>
       </section>
+      <ProposalsPanel version={changes} />
+      <ImportForm onImported={changed} />
     </div>
   );
 }

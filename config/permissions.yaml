@@ -52,3 +52,34 @@ agentes:
       - ruta: Diario/
         modo: anexar_seccion
         seccion: check-ins  # solo añade líneas en "## Check-ins"; no edita el plan del día
+  # Especialistas (Fase 8, ADR-0018). Techo del PROPIETARIO: leen solo su área y proponen al
+  # Jefe en Propuestas/ (modo crear). Importar un archivo no los activa (RULES E.10) y el código
+  # les impide publicar, capturar o escribir fuera de Propuestas/ aunque se ampliara este techo.
+  universidad:
+    herramientas: [leer_nota, listar_tareas, proponer_al_jefe]
+    lectura:
+      - 01-Universidad/
+    escritura:
+      - ruta: Propuestas/
+        modo: crear
+  proyectos:
+    herramientas: [leer_nota, listar_tareas, proponer_al_jefe]
+    lectura:
+      - 02-Proyectos/
+    escritura:
+      - ruta: Propuestas/
+        modo: crear
+  carrera:
+    herramientas: [leer_nota, listar_tareas, proponer_al_jefe]
+    lectura:
+      - 03-Carrera/
+    escritura:
+      - ruta: Propuestas/
+        modo: crear
+  hobbies:
+    herramientas: [leer_nota, listar_tareas, proponer_al_jefe]
+    lectura:
+      - 04-Hobbies/
+    escritura:
+      - ruta: Propuestas/
+        modo: crear

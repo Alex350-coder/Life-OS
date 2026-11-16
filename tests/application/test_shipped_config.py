@@ -4,8 +4,8 @@ from pathlib import Path
 
 import pytest
 
-from lifeos.adapters.yaml_config import YamlConfigSource
-from lifeos.application.permissions import TOOL_WRITE_MODES, resolve_effective
+from lifeos.adapters.yaml_config import YamlConfigSource, parse_agent
+from lifeos.application.permissions import TOOL_WRITE_MODES, resolve_effective, validate_specialist
 from lifeos.ports.config import WriteMode
 from lifeos.ports.vault import VaultPath, within_any
 from tests.config_samples import KNOWN_CONTRACTS
@@ -54,3 +54,32 @@ def test_shipped_catalog_uses_only_nvidia_and_declares_unknown_costs_honestly(
     assert {profile.provider for profile in catalog.profiles.values()} == {"nvidia"}
     # Sin tarifas fechadas, el costo se registra como desconocido (nunca 0).
     assert catalog.tariff_date is not None or not catalog.tariffs
+
+
+SPECIALISTS = sorted((CONFIG_DIR / "especialistas").glob("*.yaml"))
+
+
+def test_four_specialist_templates_are_shipped() -> None:
+    assert [path.stem for path in SPECIALISTS] == ["carrera", "hobbies", "proyectos", "universidad"]
+
+
+@pytest.mark.parametrize("path", SPECIALISTS, ids=lambda path: path.stem)
+def test_shipped_specialists_validate_against_shipped_policy(
+    source: YamlConfigSource, path: Path
+) -> None:
+    agent = parse_agent(path.read_bytes(), path.name)
+    perms = validate_specialist(
+        agent,
+        source.load_policy(),
+        source.load_catalog(),
+        tools=TOOL_WRITE_MODES,
+        contracts=KNOWN_CONTRACTS,
+        core_ids=frozenset({"jefe", "coach"}),
+    )
+    assert agent.id == path.stem
+    assert perms.plan_writes == ()
+    assert {str(grant.root) for grant in perms.writes} == {"Propuestas"}
+
+
+def test_specialist_templates_are_not_loaded_as_core_agents(source: YamlConfigSource) -> None:
+    assert {agent.id for agent in source.load_agents()} == {"jefe", "coach"}

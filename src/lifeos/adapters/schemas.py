@@ -10,10 +10,19 @@ import re
 from collections.abc import Callable, Mapping
 from datetime import date, time
 from types import MappingProxyType
-from typing import Annotated, Any
+from typing import Annotated, Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError
 
+from lifeos.domain.area_proposals import (
+    MAX_ITEMS as MAX_AREA_ITEMS,
+)
+from lifeos.domain.area_proposals import (
+    MAX_REASON_CHARS,
+    ProposalItem,
+    ProposalKind,
+)
+from lifeos.domain.area_proposals import MAX_TITLE_CHARS as MAX_AREA_TITLE_CHARS
 from lifeos.domain.checkin import MAX_CHECKIN_CHARS, CheckInEntry
 from lifeos.domain.coach import MAX_MICRO_STEP_CHARS, MAX_MICRO_STEP_MINUTES, MicroStep
 from lifeos.domain.errors import ValidationError as DomainValidationError
@@ -28,6 +37,7 @@ from lifeos.domain.proposals import (
     DraftBlock,
     PlanDraft,
 )
+from lifeos.domain.task import Effort, Priority
 from lifeos.ports.llm import ModelOutputError, OutputSchema
 
 MAX_OUTPUT_CHARS = 64 * 1024
@@ -74,6 +84,36 @@ class _CoachV1(_Strict):
 
     mensaje: Annotated[str, StringConstraints(min_length=1, max_length=MAX_COACH_MESSAGE_CHARS)]
     micro_paso: _MicroStepV1 | None = None
+
+
+_TASK_ID = r"^t-[23456789abcdefghjkmnpqrstvwxyz]{6}$"
+_Reason = Annotated[str, StringConstraints(min_length=1, max_length=MAX_REASON_CHARS)]
+_PriorityName = Literal["alta", "media", "baja"]
+
+
+class _PriorityChangeV1(_Strict):
+    tipo: Literal["prioridad"]
+    tarea: Annotated[str, StringConstraints(pattern=_TASK_ID)]
+    prioridad: _PriorityName
+    motivo: _Reason
+
+
+class _NewTaskV1(_Strict):
+    tipo: Literal["nueva_tarea"]
+    titulo: Annotated[str, StringConstraints(min_length=1, max_length=MAX_AREA_TITLE_CHARS)]
+    esfuerzo: Annotated[str, StringConstraints(pattern=r"^\d{1,3}(\.\d)?[mh]$")]
+    vence: Annotated[str, StringConstraints(pattern=r"^\d{4}-\d{2}-\d{2}$")] | None = None
+    prioridad: _PriorityName
+    motivo: _Reason
+
+
+class _AreaProposalV1(_Strict):
+    """Solo propuestas: el estado, las claves y la nota los pone el código (RULES C.3)."""
+
+    propuestas: Annotated[
+        list[Annotated[_PriorityChangeV1 | _NewTaskV1, Field(discriminator="tipo")]],
+        Field(max_length=MAX_AREA_ITEMS),
+    ]
 
 
 def _reject_duplicates(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -165,6 +205,34 @@ def _to_coach(parsed: _CoachV1) -> CoachDraft:
     return CoachDraft(parsed.mensaje, micro)
 
 
+def _to_area_item(key: str, item: _PriorityChangeV1 | _NewTaskV1) -> ProposalItem:
+    if isinstance(item, _PriorityChangeV1):
+        return ProposalItem(
+            key,
+            ProposalKind.PRIORIDAD,
+            Priority.parse(item.prioridad),
+            item.motivo,
+            task_id=TaskId(item.tarea),
+        )
+    try:
+        due = date.fromisoformat(item.vence) if item.vence is not None else None
+    except ValueError:
+        raise DomainValidationError("vence", item.vence, "fecha inexistente") from None
+    return ProposalItem(
+        key,
+        ProposalKind.NUEVA_TAREA,
+        Priority.parse(item.prioridad),
+        item.motivo,
+        title=item.titulo,
+        effort=Effort.parse(item.esfuerzo),
+        due=due,
+    )
+
+
+def _to_area(parsed: _AreaProposalV1) -> tuple[ProposalItem, ...]:
+    return tuple(_to_area_item(f"p{n}", item) for n, item in enumerate(parsed.propuestas, start=1))
+
+
 SCHEMAS: Mapping[str, OutputSchema[Any]] = MappingProxyType(
     {
         "captura_v1": PydanticOutputSchema(
@@ -173,5 +241,6 @@ SCHEMAS: Mapping[str, OutputSchema[Any]] = MappingProxyType(
         "checkin_v1": PydanticOutputSchema("checkin_v1", _CheckinV1, _to_checkin),
         "plan_v1": PydanticOutputSchema("plan_v1", _PlanV1, _to_plan),
         "coach_v1": PydanticOutputSchema("coach_v1", _CoachV1, _to_coach),
+        "propuesta_area_v1": PydanticOutputSchema("propuesta_area_v1", _AreaProposalV1, _to_area),
     }
 )

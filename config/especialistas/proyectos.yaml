@@ -1,0 +1,23 @@
+# Especialista Proyectos (Fase 8, ADR-0004, ADR-0018). Plantilla para IMPORTAR, no se carga sola:
+#   uv run lifeos-agentes importar config/especialistas/proyectos.yaml
+# Este archivo SOLICITA; la política del propietario decide. Queda en borrador hasta que lo
+# pruebes, lo apruebes y lo actives. Para una versión nueva, sube 'version'.
+schema_version: 1
+id: proyectos
+nombre: Proyectos
+version: 1
+proposito: "Revisar proyectos personales y de portafolio y proponer al Jefe prioridades y siguientes pasos."
+area: proyectos
+modelo_solicitado:
+  perfil: ligero
+contrato:
+  entrada: propuesta_area_v1
+  salida: propuesta_area_v1
+herramientas: [leer_nota, listar_tareas, proponer_al_jefe]
+permisos_solicitados:
+  lectura:
+    - 02-Proyectos/
+  escritura:
+    - ruta: Propuestas/
+      modo: crear
+metricas: [propuestas_generadas, propuestas_aceptadas]

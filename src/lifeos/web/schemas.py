@@ -47,3 +47,31 @@ class AnswerIn(_Strict):
 
 class ClosingIn(_Strict):
     respuestas: list[AnswerIn] = Field(default_factory=list, max_length=MAX_ANSWERS)
+
+
+# --- Registro de agentes y propuestas (Fase 8) -----------------------------------------------
+
+# Por debajo del límite del cuerpo (64 KiB, middleware): un agente real ocupa ~1 KiB.
+MAX_AGENT_FILE = 32 * 1024
+
+
+class AgentImportIn(BaseModel):
+    # Sin recortar espacios: el archivo se guarda tal cual y su huella debe coincidir.
+    model_config = ConfigDict(extra="forbid")
+
+    nombre: str = Field(min_length=1, max_length=80, pattern=r"^[A-Za-z0-9._-]+$")
+    contenido: str = Field(min_length=1, max_length=MAX_AGENT_FILE)
+
+
+class AgentActionIn(_Strict):
+    accion: Literal["aprobar", "activar", "desactivar", "restaurar"]
+    version: int | None = Field(default=None, ge=1, le=1000)
+
+
+class AgentRunIn(_Strict):
+    semana: str | None = Field(default=None, max_length=MAX_SHORT)
+    ia: StrictBool = False
+
+
+class ProposalRefIn(_Strict):
+    ref: str = Field(min_length=1, max_length=80)

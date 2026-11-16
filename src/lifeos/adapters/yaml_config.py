@@ -28,6 +28,7 @@ from pydantic import (
     model_validator,
 )
 
+from lifeos.domain.task import Area
 from lifeos.ports.config import (
     AgentCeiling,
     AgentConfig,
@@ -106,6 +107,8 @@ def strict_load(text: str, source: str = "config") -> object:
             return loader.get_single_data()
         finally:
             loader.dispose()
+    except RecursionError:
+        raise ConfigSyntaxError(source, ("YAML no válido: anidamiento excesivo",)) from None
     except yaml.YAMLError as error:
         # Solo el problema y la línea: el contexto de PyYAML reproduce fragmentos del archivo.
         problem = getattr(error, "problem", None) or type(error).__name__
@@ -261,6 +264,11 @@ class _AgentFile(_Strict):
     nombre: Annotated[str, StringConstraints(min_length=1, max_length=80)]
     version: int = Field(ge=1)
     proposito: Annotated[str, StringConstraints(min_length=1, max_length=500)]
+    # Solo especialistas (Fase 8). El registro exige que un agente importado la declare.
+    area: (
+        Literal["universidad", "proyectos", "carrera", "hobbies", "salud", "finanzas", "cotidiano"]
+        | None
+    ) = None
     modelo_solicitado: _RequestedModel
     contrato: _Contract
     herramientas: list[ToolName]
@@ -359,6 +367,7 @@ def parse_agent(data: bytes, source: str = "agente") -> AgentConfig:
         writes=tuple(_grant(w.ruta, w.modo, w.seccion) for w in requested.escritura),
         metrics=tuple(parsed.metricas),
         source_sha256=hashlib.sha256(data).hexdigest(),
+        area=Area(parsed.area) if parsed.area is not None else None,
     )
 
 

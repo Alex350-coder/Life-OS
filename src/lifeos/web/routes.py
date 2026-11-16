@@ -27,6 +27,7 @@ from lifeos.domain.plan import PlanOrigin
 from lifeos.domain.task import Area, TaskStatus
 from lifeos.domain.weeks import IsoWeek
 from lifeos.web import serialize
+from lifeos.web.agents_routes import imported
 from lifeos.web.errors import fail, ok
 from lifeos.web.middleware import SESSION_SCOPE_KEY
 from lifeos.web.runtime import (
@@ -242,7 +243,8 @@ def agentes(
     overview = agents_overview(
         runtime.agents, runtime.permissions, runtime.policy, runtime.catalog, usage
     )
-    return ok(serialize.agents(overview, f"{year:04d}-{month:02d}"))
+    data = serialize.agents(overview, f"{year:04d}-{month:02d}")
+    return ok({**data, "imported": imported(runtime)})
 
 
 @router.get("/uso")
