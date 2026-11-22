@@ -1,4 +1,6 @@
-# Life OS — aplicación
+# Life OS — aplicación (V2)
+
+V2: la interfaz web es el edificio de Habblaud adaptado a LifeOS (ADR-0022, ADR-0023). La V1 con la vista clásica en React queda en la etiqueta `v1-clasica`.
 
 Repositorio de código de Life OS. La documentación de planificación (plan, reglas, ADR, specs, fases) vive en la carpeta padre `../` y no se copia aquí (ADR-0005).
 
@@ -89,15 +91,15 @@ uv run lifeos-web                            # escucha solo en 127.0.0.1:8765 (L
   - Reiniciar el servidor cierra todas las sesiones; para volver a entrar, usa la URL nueva.
   - Si la sesión sigue viva, abrir otra vez el enlace lleva a la app. La precarga del navegador no gasta el token.
   - El puerto se abre en exclusiva. Si ya hay un `lifeos-web` en marcha, el segundo no arranca (`no se pudo abrir 127.0.0.1:8765`).
-- **Vistas** (estilo de `../DESIGN.md`: lienzo oscuro, botones en píldora y el trío pastel):
-  - *Hoy:* bloque actual, chat con el Coach (check-in) y cierre, que pide vista previa antes de confirmar.
-  - *Oficina:* escena pixel art animada, generada por código (inspirada en Habblaud). Tú, el Jefe, el Coach y los especialistas aparecen en sus puestos con datos reales del día. La luz sigue la hora y hay una barra de progreso del trabajo. Un clic en un personaje abre su vista. La lista de abajo dice lo mismo en texto. Con `prefers-reduced-motion` se muestra un fotograma fijo. La Fase 9 añade «Mi día», paseos, estaciones y reacciones (ver más abajo).
-  - *Semana:* carga por día, tiempo protegido y chat con el Jefe (proponer, aprobar y replanificar).
-  - *Tareas:* captura rápida, próximos vencimientos y filtros.
-  - *Historial:* la auditoría de este mes y del anterior.
-  - *Agentes:* permisos efectivos, uso del mes y, desde la Fase 8, importación, ciclo de vida y propuestas.
-  - *Indicadores:* utilidad real y carga de avisos (Fase 9).
-  - Los chats se guardan en este navegador (almacenamiento local, 100 mensajes como máximo). Se borran con «Borrar conversación».
+- **Interfaz: el edificio** (interfaz de [Habblaud](https://github.com/marmottajr/habblaud), MIT, adaptada; ver `web/src/habblaud/ORIGEN.md`):
+  - Un mundo pixel art con una sala por agente: *Tu espacio*, *Oficina del Jefe*, *Oficina del Coach* y una por especialista. Cada estado sale de datos reales de tu bóveda.
+  - Un clic en un agente o en su sala abre su oficina. La barra superior abre las mismas ventanas: Tareas, Semana, Hoy, Agentes, Propuestas, Historial, Indicadores y Calendario (solo lectura).
+  - *Semana (Jefe):* proponer, aprobar y replanificar, con los conflictos del validador a la vista.
+  - *Hoy (Coach):* el día, el check-in y el cierre; «Confirmar» solo se habilita tras la vista previa.
+  - *Tareas:* captura rápida, búsqueda por área, estado y texto, y próximos vencimientos.
+  - *Agentes:* permisos efectivos, uso del mes, importar, probar, ejecutar, ciclo de vida y exportar especialistas.
+  - Panel lateral de salas y agentes, actividad desde el historial y avisos de lo nuevo.
+  - Cada una de las rutas de la API tiene un botón o una ventana: lo comprueban `tests/web/test_edificio_rutas.py` y `web/src/lifeos-edificio/inventario.test.ts`.
 - **IA.** Las casillas de IA usan las mismas opciones `--ia` de la CLI y necesitan `NVIDIA_API_KEY`. Admiten 6 peticiones por minuto.
 - **Seguridad (SEC-11).**
   - Una petición sin sesión recibe 401.
@@ -208,16 +210,6 @@ Solo lectura y sin IA. Mide lo que pide PLAN §13 con tus notas y los logs:
 - carga de notificaciones.
 
 Lo que no se puede medir se dice con su motivo, y lo desconocido aparece como «desconocido», nunca como 0. Las notas o líneas ilegibles se cuentan y no detienen el informe. La web lo muestra en la pestaña *Indicadores* (`GET /api/indicadores`, 30 s de caché).
-
-## Oficina (Fase 9, F9-T04; ADR-0019)
-Canvas 2D propio, sin dependencias. Además de la escena de la Fase 5:
-- panel «Mi día» con el trabajo hecho, el foco frente a tu límite, la racha de cierres y lo siguiente;
-- en el tiempo libre, el Jefe y el Coach van al sofá y charlan con datos reales del día;
-- decoración por estación según tu zona horaria;
-- reacciones breves a un plan aprobado, un check-in, una propuesta del Coach o un bloque terminado, también anunciadas como texto;
-- botón «Vista sencilla».
-
-Va a 12 fps (8 en equipos modestos), se detiene cuando la pestaña no se ve y muestra un fotograma fijo con `prefers-reduced-motion`.
 
 ## Verificación real del proveedor
 ```bash

@@ -15,6 +15,17 @@ const ESTADOS = [
   ["cancelada", "Cancelada"],
 ] as const;
 
+const AREAS = [
+  ["", "Todas"],
+  ["universidad", "Universidad"],
+  ["proyectos", "Proyectos"],
+  ["carrera", "Carrera"],
+  ["hobbies", "Hobbies"],
+  ["salud", "Salud"],
+  ["finanzas", "Finanzas"],
+  ["cotidiano", "Cotidiano"],
+] as const;
+
 const DIAS = [
   ["7", "7 días"],
   ["14", "14 días"],
@@ -28,7 +39,7 @@ export function lineaTarea(t: Task): string {
 
 export function crearTareas(refrescar: () => void): Ventana {
   const captura = entrada("Escribe una idea o tarea y pulsa Capturar");
-  const area = entrada("p. ej., universidad");
+  const area = selector(AREAS);
   const estado = selector(ESTADOS);
   const buscar = entrada("Texto");
   const dias = selector(DIAS, "14");
@@ -68,7 +79,7 @@ export function crearTareas(refrescar: () => void): Ventana {
         "div",
         { class: "lo-actions" },
         win.boton("Buscar", "tareas", async () => {
-          const t = await acciones.tareas({ area: area.value.trim(), estado: estado.value, texto: buscar.value.trim() });
+          const t = await acciones.tareas({ area: area.value, estado: estado.value, texto: buscar.value.trim() });
           pintar(resultados, lista(t.map(lineaTarea), "Ninguna tarea coincide."));
         }),
       ),

@@ -61,7 +61,7 @@ describe("inventario del edificio", () => {
   it("cada botón de la barra abre una ventana real o hace una acción real", () => {
     const { ventanas } = montar();
     const botones = botonesBarra(ventanas, async () => undefined);
-    const conVentana = botones.filter((b) => b.ruta === undefined && b.id !== "clasica");
+    const conVentana = botones.filter((b) => b.ruta === undefined);
     for (const b of conVentana) {
       b.onClick(document.createElement("button"));
       const w = Object.values(ventanas).find((v) => v.id === b.id);

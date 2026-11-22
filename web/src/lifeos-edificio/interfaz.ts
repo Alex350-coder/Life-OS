@@ -75,7 +75,6 @@ export function botonesBarra(v: Ventanas, salir: () => Promise<void>): BotonBarr
     { id: "historial", label: "Historial", icon: ICONOS.historial, onClick: abrir(v.historial) },
     { id: "indicadores", label: "Indicadores", icon: ICONOS.indicadores, onClick: abrir(v.indicadores) },
     { id: "calendario", label: "Calendario", icon: ICONOS.calendario, onClick: abrir(v.calendario) },
-    { id: "clasica", label: "Vista clásica", icon: ICONOS.clasica, onClick: () => location.assign("/") },
     { id: "salir", label: "Cerrar sesión", icon: ICONOS.salir, ruta: RUTA.cerrarSesion, onClick: () => void salir() },
   ];
 }

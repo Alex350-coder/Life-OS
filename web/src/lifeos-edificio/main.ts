@@ -1,6 +1,6 @@
-// Entrada de edificio.html (F11-T03, ADR-0022). Como el main.ts de Habblaud: primero el diccionario español
+// Entrada de index.html, la interfaz de LifeOS (ADR-0022, ADR-0023). Como el main.ts de Habblaud: primero el diccionario español
 // (varios módulos llaman a tr() al cargarse), después el mundo y la interfaz. Sin sesión, la página carga
-// pero no ve datos: la barra lo muestra y la vista clásica sigue en «/».
+// pero no ve datos: el aviso de conexión explica cómo entrar.
 import "@fontsource/pixelify-sans/400.css";
 import "@fontsource/pixelify-sans/500.css";
 import "@fontsource/pixelify-sans/600.css";

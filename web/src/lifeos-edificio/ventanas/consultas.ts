@@ -140,7 +140,7 @@ export function crearCalendario(): Ventana {
 export function crearAyuda(): Ventana {
   const win = new Ventana("ayuda", "Ayuda");
   win.body.append(
-    h("p", { class: "lo-lead", text: "El edificio es la cara visual de LifeOS: todo lo que ves sale de tu bóveda y cada botón usa la misma API que la vista clásica." }),
+    h("p", { class: "lo-lead", text: "El edificio es la interfaz de LifeOS: todo lo que ves sale de tu bóveda y cada botón usa la API local, que valida y aplica los permisos." }),
     seccion(
       "Salas",
       lista([

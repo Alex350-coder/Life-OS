@@ -15,15 +15,16 @@ from lifeos.domain.coach import CheckInState
 from lifeos.domain.task import Area, TaskStatus
 
 WEB = Path(__file__).resolve().parent.parent.parent / "web" / "src"
+WINDOWS = WEB / "lifeos-edificio" / "ventanas"
 
 pytestmark = pytest.mark.unit
 
 
-def _strings(source: str, name: str) -> set[str]:
-    """Cadenas de `const NAME = [...]` en un archivo del frontend."""
-    match = re.search(rf"const {name} = \[(.*?)\];", source, re.S)
+def _options(source: str, name: str) -> set[str]:
+    """Valores de `const NAME = [["valor", "Etiqueta"], ...]` en una ventana del edificio."""
+    match = re.search(rf"const {name} = \[(.*?)\] as const;", source, re.S)
     assert match is not None, name
-    return set(re.findall(r'"([a-z_ ]*)"', match[1]))
+    return set(re.findall(r'\["([a-z_]*)", "', match[1]))
 
 
 def _values(kind: type[StrEnum]) -> set[str]:
@@ -31,15 +32,14 @@ def _values(kind: type[StrEnum]) -> set[str]:
 
 
 def test_checkin_states_match_the_domain() -> None:
-    source = (WEB / "views" / "CoachChat.tsx").read_text(encoding="utf-8")
-    states = set(re.findall(r'\["([a-z]+)", "', source))
-    assert states == _values(CheckInState)
+    source = (WINDOWS / "coach.ts").read_text(encoding="utf-8")
+    assert _options(source, "ESTADOS") == _values(CheckInState)
 
 
 def test_task_filters_match_the_domain() -> None:
-    source = (WEB / "views" / "TasksView.tsx").read_text(encoding="utf-8")
-    assert _strings(source, "AREAS") - {""} == _values(Area)
-    assert _strings(source, "STATUSES") - {""} == _values(TaskStatus)
+    source = (WINDOWS / "tareas.ts").read_text(encoding="utf-8")
+    assert _options(source, "AREAS") - {""} == _values(Area)
+    assert _options(source, "ESTADOS") - {""} == _values(TaskStatus)
 
 
 def test_closing_answer_kinds_match_the_domain() -> None:

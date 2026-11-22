@@ -1,7 +1,7 @@
 import AxeBuilder from "@axe-core/playwright";
 import { expect, test, type Page } from "@playwright/test";
 
-// Edificio (F11, ADR-0022) contra el backend real en su servidor aislado (bóveda temporal inventada,
+// Edificio (F11, ADR-0022/0023): la interfaz de LifeOS contra el backend real (bóveda temporal inventada,
 // lunes 2026-11-02 07:30). Se usa LifeOS entero desde la interfaz de Habblaud y se comprueba con la API
 // que cada acción persiste. Serie: cada prueba parte del estado que deja la anterior.
 test.describe.configure({ mode: "serial" });
@@ -34,7 +34,7 @@ async function api<T>(page: Page, path: string): Promise<T> {
 
 test("sin plan el edificio se puebla y el Jefe espera (hallazgo 1)", async ({ page }) => {
   const problems = vigilar(page);
-  await page.goto("/edificio.html");
+  await page.goto("/");
   await expect(page.locator("canvas#world")).toBeVisible();
   await expect(page.locator(".ui-pill__text")).toHaveText("Conectado");
   await expect(page.locator("#ui-sidebar")).toContainText("Oficina del Jefe");
@@ -45,7 +45,7 @@ test("sin plan el edificio se puebla y el Jefe espera (hallazgo 1)", async ({ pa
 });
 
 test("la oficina del Jefe propone y aprueba la semana; queda aprobada en la bóveda", async ({ page }) => {
-  await page.goto("/edificio.html");
+  await page.goto("/");
   const jefe = await abrir(page, "jefe", "jefe");
   await jefe.getByRole("button", { name: "Proponer la semana" }).click();
   await expect(jefe.locator(".lo-status")).toHaveText("Plan propuesto. Revísalo y apruébalo.");
@@ -55,7 +55,7 @@ test("la oficina del Jefe propone y aprueba la semana; queda aprobada en la bóv
 });
 
 test("la oficina del Coach guarda un check-in", async ({ page }) => {
-  await page.goto("/edificio.html");
+  await page.goto("/");
   const coach = await abrir(page, "coach", "coach");
   await expect(coach).toContainText("plan aprobado");
   await coach.locator("select").first().selectOption("bloqueado");
@@ -66,7 +66,7 @@ test("la oficina del Coach guarda un check-in", async ({ page }) => {
 
 test("la captura de tu espacio llega al Inbox y un título malicioso se ve como texto", async ({ page }) => {
   const problems = vigilar(page);
-  await page.goto("/edificio.html");
+  await page.goto("/");
   const tareas = await abrir(page, "tareas", "tareas");
   await expect(tareas).toContainText("<img src=x onerror=alert(1)>");
   await tareas.getByPlaceholder("Escribe una idea o tarea y pulsa Capturar").fill("Idea desde el edificio");
@@ -76,7 +76,7 @@ test("la captura de tu espacio llega al Inbox y un título malicioso se ve como 
 });
 
 test("el cierre se ve antes de aplicarse y se confirma", async ({ page }) => {
-  await page.goto("/edificio.html");
+  await page.goto("/");
   const coach = await abrir(page, "coach", "coach");
   const confirmar = coach.getByRole("button", { name: "Confirmar cierre" });
   await expect(coach.locator(".lo-task").first()).toBeVisible();
@@ -90,7 +90,7 @@ test("el cierre se ve antes de aplicarse y se confirma", async ({ page }) => {
 
 test("clic en la sala del Jefe abre su oficina; las ventanas de consulta cargan datos reales", async ({ page }) => {
   const problems = vigilar(page);
-  await page.goto("/edificio.html");
+  await page.goto("/");
   await page.locator("#ui-sidebar").getByText("Oficina del Jefe").first().click();
   await expect(page.locator('dialog[data-ventana="jefe"]')).toBeVisible();
   const historial = await abrir(page, "historial", "historial");
@@ -103,19 +103,18 @@ test("clic en la sala del Jefe abre su oficina; las ventanas de consulta cargan 
 });
 
 test("las ventanas del edificio no tienen problemas graves de accesibilidad", async ({ page }) => {
-  await page.goto("/edificio.html");
+  await page.goto("/");
   await abrir(page, "coach", "coach");
   const results = await new AxeBuilder({ page }).include(".lo-win").include(".lo-topbar").analyze();
   const serious = results.violations.filter((v) => v.impact === "serious" || v.impact === "critical");
   expect(serious.map((v) => `${v.id}: ${v.nodes.map((n) => `${n.target.join(" ")} ${n.failureSummary ?? ""}`).join(" | ")}`)).toEqual([]);
 });
 
-test("la vista clásica sigue a un clic y cerrar sesión deja el edificio sin datos", async ({ page }) => {
-  await page.goto("/edificio.html");
-  await page.locator('[data-boton="clasica"]').click();
-  await expect(page.getByRole("tab", { name: "Hoy" })).toBeVisible();
-  await page.goto("/edificio.html");
+test("cerrar sesión deja el edificio sin datos y explica cómo volver a entrar", async ({ page }) => {
+  await page.goto("/");
+  const logout = page.waitForResponse((r) => r.url().endsWith("/api/logout"));
   await page.locator('[data-boton="salir"]').click();
-  await page.waitForURL("**/");
+  expect((await logout).status()).toBe(204);
   expect((await page.request.get("/api/hoy")).status()).toBe(401);
+  await expect(page.locator(".ui-banner")).toContainText("No hay sesión", { timeout: 10_000 });
 });
