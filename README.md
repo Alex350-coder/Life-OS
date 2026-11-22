@@ -14,6 +14,15 @@ uv run mypy
 uv run bandit -c pyproject.toml -r src
 ```
 
+### Salida de las órdenes
+En una terminal, todas las órdenes (`lifeos`, `lifeos-agentes`, `lifeos-calendario`, `lifeos-respaldo` y `lifeos-indicadores`) salen con formato y color (`src/lifeos/cli/style.py`):
+- ✖ errores en rojo, ⚠ avisos en amarillo y ✔ acciones hechas en verde;
+- secciones en negrita, separadas por una línea en blanco, y listas con viñetas •;
+- referencias de propuestas e ids de tareas en magenta, órdenes sugeridas en cian, rutas en azul;
+- estados (activo, borrador…) y prioridades (alta, media, baja) con su color.
+
+Redirigida a un archivo o a otra orden, la salida es texto plano sin cambios. `NO_COLOR=1` lo desactiva siempre y `FORCE_COLOR=1` lo fuerza.
+
 ## Configuración
 Copia `.env.example` a `.env` y complétalo. Las variables del entorno del proceso tienen prioridad sobre `.env`:
 - `LIFEOS_VAULT_PATH`: ruta a tu bóveda real, fuera del repositorio. Las pruebas nunca la usan: crean una bóveda temporal.

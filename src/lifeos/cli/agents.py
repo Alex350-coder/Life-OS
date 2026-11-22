@@ -23,6 +23,7 @@ from lifeos.application.permissions import EffectivePermissions
 from lifeos.application.proposal_review import ProposalReview, ReviewItem
 from lifeos.application.specialists import SpecialistResult, SpecialistRunner
 from lifeos.bootstrap import STARTUP_ERRORS, Runtime, Settings, build_runtime
+from lifeos.cli.output import console
 from lifeos.domain.agent_lifecycle import LifecycleAction
 from lifeos.domain.area_proposals import ProposalItem, ProposalKind, ProposalRef
 from lifeos.domain.errors import LifeOSError
@@ -272,7 +273,7 @@ def main(
     err: TextIO | None = None,
     clock: Clock | None = None,
 ) -> int:
-    stdout, stderr = out or sys.stdout, err or sys.stderr
+    stdout, stderr = out or console(sys.stdout), err or console(sys.stderr, error=True)
     try:
         args = _parser().parse_args(argv)
         _week(getattr(args, "semana", None))

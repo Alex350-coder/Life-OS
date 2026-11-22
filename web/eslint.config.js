@@ -30,4 +30,18 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Motor extraído de Habblaud (ADR-0020): se conserva su código casi literal para poder compararlo con el
+    // original. Se relajan solo reglas de estilo que el original no cumple; la regla de innerHTML (XSS) sigue activa. Solo afecta a esta carpeta.
+    files: ["src/habblaud/**/*.ts"],
+    rules: {
+      "@typescript-eslint/no-non-null-assertion": "off",
+      "@typescript-eslint/no-dynamic-delete": "off",
+      "@typescript-eslint/no-unused-vars": ["error", { argsIgnorePattern: "^_" }],
+      "prefer-const": "off",
+      "no-irregular-whitespace": "off",
+      // Los avisos de Habblaud por snapshots inválidos se conservan; nada de console.log.
+      "no-console": ["error", { allow: ["error", "warn"] }],
+    },
+  },
 );

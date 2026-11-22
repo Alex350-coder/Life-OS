@@ -1,6 +1,7 @@
 """Formato de salida de la CLI: solo presenta resultados de los casos de uso."""
 
 from collections.abc import Iterable
+from typing import TextIO
 from zoneinfo import ZoneInfo
 
 from lifeos.application.closing import ClosingPreview, ClosingResult
@@ -8,10 +9,20 @@ from lifeos.application.coach import Briefing, CheckInOutcome
 from lifeos.application.jefe import PlanOutcome
 from lifeos.application.tasks import LocatedTask
 from lifeos.application.usage_report import UsageRow, UsageSummary
+from lifeos.cli.style import styled
 from lifeos.domain.adjustments import adjustment_entry
 from lifeos.domain.closing import AnswerKind, TaskChange
 from lifeos.domain.coach import block_span
 from lifeos.domain.plan import Block, BlockKind, PlanProposal, PlanStatus
+
+
+def console(stream: TextIO, *, error: bool = False) -> TextIO:
+    """Pasa la consola a UTF-8 con reemplazo (la de Windows, cp1252, no tiene "→" ni "–") y,
+    si es una terminal, le da formato y color (`style.py`). `error` marca la salida de errores."""
+    reconfigure = getattr(stream, "reconfigure", None)
+    if reconfigure is not None:
+        reconfigure(encoding="utf-8", errors="replace")
+    return styled(stream, error=error)
 
 
 def tasks(located: Iterable[LocatedTask]) -> list[str]:
