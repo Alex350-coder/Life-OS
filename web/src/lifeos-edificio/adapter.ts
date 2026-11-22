@@ -17,7 +17,8 @@ const EMPTY_STATS = { toolCalls: 0, tokensIn: 0, tokensOut: 0, subagents: 0 } as
 
 /** Lo que el store reúne de las rutas existentes antes de traducirlo. */
 export interface LifeosData {
-  today: Briefing;
+  /** null: no hay plan para hoy (GET /api/hoy responde 409 hasta que apruebas la semana). */
+  today: Briefing | null;
   agents: Agents;
   proposals: ReviewItem[];
   upcoming: Task[];
@@ -53,7 +54,10 @@ function taskItems(tasks: Task[]): TaskItem[] {
   return tasks.filter((t) => t.id !== null).map((t) => ({ id: t.id ?? "", title: t.title, status: taskStatus(t.status) }));
 }
 
-function ownerPresence(today: Briefing): Presence {
+const NO_PLAN = "Sin plan para hoy";
+
+function ownerPresence(today: Briefing | null): Presence {
+  if (today === null) return { status: "idle", text: NO_PLAN, kind: "wait", icon: "🗓️" };
   if (today.current?.kind === "trabajo") {
     return { status: "working", text: `Trabajando en ${today.current.title}`, kind: "edit", icon: "✍️" };
   }
@@ -63,7 +67,10 @@ function ownerPresence(today: Briefing): Presence {
   return { status: "idle", text: next, kind: "wait", icon: "🕒" };
 }
 
-function jefePresence(today: Briefing): Presence {
+function jefePresence(today: Briefing | null): Presence {
+  if (today === null) {
+    return { status: "waiting", waitingFor: "proponer y aprobar la semana", text: NO_PLAN, kind: "plan", icon: "📋" };
+  }
   if (!today.approved) {
     return { status: "waiting", waitingFor: "aprobar el plan de hoy", text: "Plan sin aprobar", kind: "plan", icon: "📋" };
   }
@@ -75,7 +82,8 @@ function jefePresence(today: Briefing): Presence {
   return { status: "idle", text: "Plan aprobado", kind: "plan", icon: "✅" };
 }
 
-function coachPresence(today: Briefing): Presence {
+function coachPresence(today: Briefing | null): Presence {
+  if (today === null) return { status: "idle", text: NO_PLAN, kind: "communicate", icon: "💬" };
   const text = today.checkins === 1 ? "1 check-in hoy" : `${today.checkins} check-ins hoy`;
   return { status: "idle", text, kind: "communicate", icon: "💬" };
 }

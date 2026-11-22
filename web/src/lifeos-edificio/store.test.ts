@@ -1,7 +1,8 @@
 // LifeosStore (F11-T05): fuente de datos del edificio sobre las rutas existentes, con errores visibles.
 import type { Agents, Briefing, HistoryEntry } from "../api/types";
 import type { LifeosData } from "./adapter";
-import { LifeosStore, REFRESH_MS } from "./store";
+import { ApiError } from "../api/client";
+import { LifeosStore, REFRESH_MS, todayOrNull } from "./store";
 
 const T0 = Date.parse("2026-11-21T15:00:00-05:00");
 
@@ -89,5 +90,26 @@ describe("LifeosStore", () => {
     off();
     await store.refresh();
     expect(calls).toBe(1);
+  });
+});
+
+describe("todayOrNull (hallazgo 1)", () => {
+  it("el 409 de /api/hoy significa «no hay plan para hoy», no un fallo de conexión", async () => {
+    const noPlan = new ApiError(409, { code: "rechazado", message: "no hay plan para 2026-11-02" });
+    await expect(todayOrNull(async () => Promise.reject(noPlan))).resolves.toBeNull();
+  });
+
+  it("cualquier otro error se propaga y cierra la conexión", async () => {
+    const lost = new ApiError(401, { code: "sesion", message: "sin sesión" });
+    await expect(todayOrNull(async () => Promise.reject(lost))).rejects.toBe(lost);
+    const broken = new ApiError(500, { code: "interno", message: "fallo" });
+    await expect(todayOrNull(async () => Promise.reject(broken))).rejects.toBe(broken);
+  });
+
+  it("sin plan, el store publica el edificio y la conexión queda abierta", async () => {
+    const { store } = setup(async () => ({ ...data(), today: null }));
+    await store.refresh();
+    expect(store.connection).toBe("open");
+    expect(store.agent("jefe")?.status).toBe("waiting");
   });
 });

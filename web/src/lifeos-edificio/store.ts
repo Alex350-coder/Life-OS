@@ -2,7 +2,7 @@
 // al store SSE del servidor de Habblaud: consulta las rutas EXISTENTES de la API (con la sesión y el CSRF del
 // cliente de siempre), las traduce con el adaptador puro y avisa de lo nuevo del historial. No guarda nada propio
 // ni rellena con datos inventados: si una ruta falla, la conexión pasa a «cerrada» y se muestra el error.
-import { get } from "../api/client";
+import { ApiError, get } from "../api/client";
 import type { Agents, Briefing, HistoryEntry, ReviewItem, Task } from "../api/types";
 import type { AgentInfo, FeedItem, Notice, OfficeSnapshot, RoomInfo } from "../habblaud/shared/types";
 import type { ConnectionState, SnapshotSource, SourceEvents } from "../habblaud/world/source";
@@ -20,10 +20,22 @@ export interface StoreOptions {
   now?: () => number;
 }
 
+const NO_PLAN_STATUS = 409;
+
+/** GET /api/hoy responde 409 mientras no hay plan aprobado para hoy: es un estado real, no un fallo. */
+export async function todayOrNull(load: () => Promise<Briefing>): Promise<Briefing | null> {
+  try {
+    return await load();
+  } catch (err) {
+    if (err instanceof ApiError && err.status === NO_PLAN_STATUS) return null;
+    throw err;
+  }
+}
+
 /** Las cinco rutas existentes que alimentan el edificio, en paralelo. */
 export async function loadFromApi(): Promise<Loaded> {
   const [today, agents, proposals, upcoming, history] = await Promise.all([
-    get<Briefing>("/api/hoy"),
+    todayOrNull(() => get<Briefing>("/api/hoy")),
     get<Agents>("/api/agentes"),
     get<{ items: ReviewItem[] }>("/api/propuestas"),
     get<Task[]>("/api/tareas/proximas", { dias: UPCOMING_DAYS }),
