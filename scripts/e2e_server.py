@@ -5,10 +5,12 @@ datos INVENTADOS, con el reloj fijo el lunes 2026-11-02 07:30 (America/Lima) y u
 arranque conocido. Nunca usa la bóveda, los logs ni el `.env` del propietario. Al terminar
 borra la carpeta temporal.
 
-    uv run python scripts/e2e_server.py      # escucha en 127.0.0.1:8799
+    uv run python scripts/e2e_server.py         # escucha en 127.0.0.1:8799
+    uv run python scripts/e2e_server.py 8798    # otro servidor aislado (E2E del edificio, F11)
 """
 
 import shutil
+import sys
 import tempfile
 from datetime import datetime
 from pathlib import Path
@@ -20,7 +22,7 @@ from lifeos.bootstrap import Settings
 from lifeos.web.app import create_app
 from lifeos.web.security import LOOPBACK, LaunchToken
 
-PORT = 8799
+PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8799
 TOKEN = "token-e2e-inventado-" + "x" * 24  # inventado; solo vale para este servidor de pruebas
 PROJECT = Path(__file__).resolve().parent.parent
 NOW = datetime(2026, 11, 2, 7, 30, tzinfo=ZoneInfo("America/Lima"))

@@ -171,3 +171,15 @@ describe("toFeed", () => {
     expect(item?.activity.error).toBe(true);
   });
 });
+
+describe("toSnapshot sin plan para hoy (hallazgo 1 de la prueba en navegador)", () => {
+  it("sin plan, el edificio sigue poblado y el Jefe espera a que propongas y apruebes la semana", () => {
+    const snap = toSnapshot(data({ today: null }), 1);
+    expect(snap.agents.map((a) => a.id)).toEqual([OWNER_ID, "jefe", "coach"]);
+    const jefe = snap.agents.find((a) => a.id === "jefe");
+    expect(jefe?.status).toBe("waiting");
+    expect(jefe?.waitingFor).toBe("proponer y aprobar la semana");
+    expect(snap.agents.find((a) => a.id === OWNER_ID)?.activity?.text).toBe("Sin plan para hoy");
+    expect(snap.agents.find((a) => a.id === "coach")?.status).toBe("idle");
+  });
+});
