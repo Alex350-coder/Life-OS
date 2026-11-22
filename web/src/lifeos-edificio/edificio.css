@@ -1,0 +1,235 @@
+/* Edificio de LifeOS (F11-T03/F11-T06). El <style> en línea del index.html de Habblaud pasa aquí (la CSP no
+   admite estilos en línea) y las ventanas de LifeOS se apoyan en las variables y clases de Habblaud. */
+html,
+body.lo-edificio {
+  margin: 0;
+  height: 100%;
+  overflow: hidden;
+  background: #12151d;
+}
+
+#world {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100vh;
+  display: block;
+  image-rendering: pixelated;
+}
+
+#ui {
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+}
+
+#ui > * {
+  pointer-events: auto;
+}
+
+/* --- barra ------------------------------------------------------------------------------------ */
+.lo-brand {
+  font: 700 18px/1 var(--font-px);
+  letter-spacing: 0.5px;
+  color: var(--ui-text);
+}
+
+.lo-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+  min-width: 0;
+}
+
+.lo-nav__btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-family: var(--font-px);
+}
+
+@media (max-width: 1280px) {
+  .lo-nav__label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+  }
+}
+
+/* --- ventanas --------------------------------------------------------------------------------- */
+.lo-windows > .lo-win {
+  pointer-events: auto;
+}
+
+.ui-dialog.lo-win {
+  position: fixed;
+  inset: calc(var(--top-h) + var(--gap) * 2) var(--gap) auto auto;
+  width: min(520px, calc(100vw - 2 * var(--gap)));
+  max-height: calc(100vh - var(--top-h) - var(--feed-head) - var(--gap) * 5);
+  margin: 0;
+  z-index: 40;
+}
+
+.ui-dialog.lo-win.is-floating {
+  inset: auto;
+}
+
+.lo-win__head h2 {
+  font: 700 17px/1.2 var(--font-px);
+}
+
+.lo-win__body {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  padding: 14px 18px 18px;
+  overflow-y: auto;
+}
+
+.lo-sec h3 {
+  margin: 0 0 8px;
+  font: 600 14px/1.2 var(--font-px);
+  color: var(--ui-accent);
+}
+
+.lo-sec h4,
+.lo-card h4 {
+  margin: 0 0 4px;
+  font: 600 13px/1.3 var(--font-ui);
+}
+
+.lo-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  align-items: flex-end;
+}
+
+.lo-row > .lo-input {
+  flex: 1 1 200px;
+}
+
+.lo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.lo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1 1 140px;
+  min-width: 0;
+}
+
+.lo-field__label {
+  color: var(--ui-muted);
+  font-size: 12px;
+}
+
+.lo-input {
+  width: 100%;
+  box-sizing: border-box;
+}
+
+textarea.lo-input {
+  resize: vertical;
+  font-family: var(--font-mono);
+}
+
+.lo-check {
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  color: var(--ui-muted);
+  font-size: 12px;
+}
+
+.lo-list {
+  margin: 0;
+  padding-left: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  overflow-wrap: anywhere;
+}
+
+.lo-lead {
+  margin: 0;
+  font-weight: 600;
+}
+
+.lo-muted,
+.lo-empty {
+  margin: 0;
+  color: var(--ui-muted);
+  font-size: 12px;
+}
+
+.lo-card,
+.lo-task {
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--radius-sm);
+  background: var(--ui-bg-soft);
+}
+
+.lo-task {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.lo-task legend {
+  padding: 0 4px;
+  color: var(--ui-text);
+}
+
+.lo-result:empty {
+  display: none;
+}
+
+.lo-status {
+  margin: 0;
+  padding: 8px 18px;
+  font-size: 12.5px;
+  border-bottom: 1px solid var(--ui-line);
+}
+
+.lo-status--ok {
+  color: var(--lv-ok);
+}
+
+.lo-status--error {
+  color: var(--lv-crit);
+}
+
+.lo-status--info {
+  color: var(--ui-accent);
+}
+
+@media (max-width: 900px) {
+  .ui-dialog.lo-win {
+    inset: calc(var(--top-h) + var(--gap)) var(--gap) var(--gap) var(--gap);
+    width: auto;
+    max-height: none;
+  }
+}
+
+/* El primario de Habblaud (#2f7fd1 con texto blanco) da 4.13:1; WCAG AA pide 4.5:1 para este tamaño. */
+.lo-win .ui-btn--primary,
+.lo-win .ui-btn--primary:hover {
+  background: #2568ad;
+  border-color: #2568ad;
+}
+
+/* Varias ventanas pueden apilarse: fondo opaco para que no se transparente la de abajo. */
+.ui-dialog.lo-win {
+  background: #141821;
+}
