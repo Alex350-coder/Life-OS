@@ -11,7 +11,9 @@ from fastapi.testclient import TestClient
 
 from tests.web.conftest import ORIGIN, build_web
 
-EDIFICIO = '<!doctype html><title>Edificio</title><script type="module" src="/assets/e.js"></script>'
+EDIFICIO = (
+    '<!doctype html><title>Edificio</title><script type="module" src="/assets/e.js"></script>'
+)
 CLASICA = "<!doctype html><title>LifeOS</title>"
 
 
