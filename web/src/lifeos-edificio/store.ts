@@ -56,6 +56,8 @@ export class LifeosStore implements SnapshotSource {
   readonly replaying = false;
   nextRetryAt: number | null = null;
   lastError: string | null = null;
+  /** Estado HTTP del último fallo (0 = sin respuesta del servidor), para explicar el aviso. */
+  lastStatus: number | null = null;
   private rev = 0;
   private seenFeed: Set<string> | null = null;
   private timer: ReturnType<typeof setInterval> | null = null;
@@ -113,11 +115,13 @@ export class LifeosStore implements SnapshotSource {
       loaded = await this.load();
     } catch (err) {
       this.lastError = message(err);
+      this.lastStatus = err instanceof ApiError ? err.status : 0;
       this.nextRetryAt = this.now() + REFRESH_MS;
       this.setConnection("closed");
       return;
     }
     this.lastError = null;
+    this.lastStatus = null;
     this.nextRetryAt = null;
     this.publish({ ...loaded, now: this.now() });
     this.setConnection("open");

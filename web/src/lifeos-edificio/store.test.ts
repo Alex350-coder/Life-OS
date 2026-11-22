@@ -61,6 +61,7 @@ describe("LifeosStore", () => {
     expect(store.snapshot).toBe(before);
     expect(store.nextRetryAt).toBe(T0 + REFRESH_MS);
     expect(store.lastError).toBe("sin conexión");
+    expect(store.lastStatus).toBe(0); // no es un ApiError: el servidor no respondió
   });
 
   it("la actividad sale del historial real, del más antiguo al más nuevo", async () => {
