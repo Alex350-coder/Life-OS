@@ -30,4 +30,10 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // Motor extraído de Habblaud (ADR-0020): se conserva su código casi literal para poder compararlo con el
+    // original. Usa aserciones no nulas que su tsconfig (tsconfig.engine.json) admite. Solo afecta a esta carpeta.
+    files: ["src/building/engine/**/*.ts"],
+    rules: { "@typescript-eslint/no-non-null-assertion": "off" },
+  },
 );

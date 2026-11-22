@@ -5,8 +5,8 @@
   "description": "Interfaz web local de Life OS (Fase 5, ADR-0012).",
   "type": "module",
   "scripts": {
-    "build": "tsc --noEmit && vite build",
-    "typecheck": "tsc --noEmit",
+    "build": "tsc -b tsconfig.engine.json && tsc --noEmit && vite build",
+    "typecheck": "tsc -b tsconfig.engine.json && tsc --noEmit",
     "lint": "eslint .",
     "test": "vitest run",
     "test:coverage": "vitest run --coverage",
