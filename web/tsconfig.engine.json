@@ -20,7 +20,7 @@
     "emitDeclarationOnly": true,
     "declaration": true,
     "outDir": "node_modules/.cache/engine-types",
-    "rootDir": "src/building/engine",
+    "rootDir": "src/habblaud",
     "types": [
       "vitest/globals",
       "node"
@@ -28,6 +28,6 @@
     "tsBuildInfoFile": "node_modules/.cache/engine-types/tsconfig.engine.tsbuildinfo"
   },
   "include": [
-    "src/building/engine"
+    "src/habblaud"
   ]
 }

@@ -19,6 +19,6 @@
   },
   "include": ["src", "e2e", "vite.config.ts", "playwright.config.ts"],
   // Motor de Habblaud (ADR-0020): se compila aparte con tsconfig.engine.json y se usa por referencia.
-  "exclude": ["src/building/engine"],
+  "exclude": ["src/habblaud"],
   "references": [{ "path": "./tsconfig.engine.json" }]
 }
