@@ -10,8 +10,8 @@ import shutil
 from pathlib import Path
 
 import pytest
-from lifeos.cli.main import main
 
+from lifeos.cli.main import main
 from tests.fakes import FakeClock
 from tests.planning_builders import NOW
 from tests.planning_samples import HORARIO, HORARIO_SIN_LIMITES
