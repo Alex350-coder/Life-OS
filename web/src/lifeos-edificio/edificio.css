@@ -1,5 +1,15 @@
 /* Edificio de LifeOS (F11-T03/F11-T06). El <style> en línea del index.html de Habblaud pasa aquí (la CSP no
-   admite estilos en línea) y las ventanas de LifeOS se apoyan en las variables y clases de Habblaud. */
+   admite estilos en línea) y las ventanas de LifeOS se apoyan en las variables y clases de Habblaud.
+   Cada clase lo-* en uso debe tener aquí su regla (estilos.test.ts). */
+:root {
+  --lo-win-bg: #141821;
+  --lo-control-h: 30px;
+  --lo-ok: #6fe0a3;
+  --lo-info: #8fd0ff;
+  --lo-warn: #ffc66b;
+  --lo-bad: #ff9b9b;
+}
+
 html,
 body.lo-edificio {
   margin: 0;
@@ -28,6 +38,10 @@ body.lo-edificio {
 }
 
 /* --- barra ------------------------------------------------------------------------------------ */
+.lo-topbar {
+  gap: 12px;
+}
+
 .lo-brand {
   font: 700 18px/1 var(--font-px);
   letter-spacing: 0.5px;
@@ -49,187 +63,692 @@ body.lo-edificio {
   font-family: var(--font-px);
 }
 
+.lo-nav__icon {
+  display: inline-grid;
+  place-items: center;
+}
+
+.lo-nav__label {
+  white-space: nowrap;
+}
+
 @media (max-width: 1280px) {
   .lo-nav__label {
     position: absolute;
     width: 1px;
     height: 1px;
     overflow: hidden;
-    clip: rect(0 0 0 0);
+    clip-path: inset(50%);
   }
 }
 
-/* --- ventanas --------------------------------------------------------------------------------- */
+/* --- ventanas: marco -------------------------------------------------------------------------- */
 .lo-windows > .lo-win {
   pointer-events: auto;
 }
 
+/* Fondo opaco: varias ventanas pueden apilarse y no debe transparentarse la de abajo. */
 .ui-dialog.lo-win {
   position: fixed;
   inset: calc(var(--top-h) + var(--gap) * 2) var(--gap) auto auto;
-  width: min(520px, calc(100vw - 2 * var(--gap)));
-  max-height: calc(100vh - var(--top-h) - var(--feed-head) - var(--gap) * 5);
+  width: min(420px, calc(100vw - 2 * var(--gap)));
+  max-height: min(480px, calc(100vh - var(--top-h) - var(--gap) * 4));
   margin: 0;
   z-index: 40;
+  background: var(--lo-win-bg);
 }
 
 .ui-dialog.lo-win.is-floating {
   inset: auto;
+  max-height: none;
 }
 
-.lo-win__head h2 {
-  font: 700 17px/1.2 var(--font-px);
+.lo-win__head {
+  padding: 10px 10px 8px 16px;
+  flex: none;
+}
+
+.lo-win__head .lo-win__title {
+  font: 700 16px/1.2 var(--font-px);
 }
 
 .lo-win__body {
   display: flex;
   flex-direction: column;
-  gap: 14px;
-  padding: 14px 18px 18px;
+  gap: 10px;
+  padding: 12px 16px 14px;
   overflow-y: auto;
+  min-height: 0;
 }
 
-.lo-sec h3 {
-  margin: 0 0 8px;
-  font: 600 14px/1.2 var(--font-px);
-  color: var(--ui-accent);
+.lo-win__body,
+.lo-textarea {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(160, 176, 210, 0.25) transparent;
 }
 
-.lo-sec h4,
-.lo-card h4 {
-  margin: 0 0 4px;
-  font: 600 13px/1.3 var(--font-ui);
-}
-
-.lo-row {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 8px 12px;
-  align-items: flex-end;
-}
-
-.lo-row > .lo-input {
-  flex: 1 1 200px;
-}
-
-.lo-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-  margin-top: 8px;
-}
-
-.lo-field {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  flex: 1 1 140px;
-  min-width: 0;
-}
-
-.lo-field__label {
-  color: var(--ui-muted);
-  font-size: 12px;
-}
-
-.lo-input {
-  width: 100%;
-  box-sizing: border-box;
-}
-
-textarea.lo-input {
-  resize: vertical;
-  font-family: var(--font-mono);
-}
-
-.lo-check {
-  display: inline-flex;
-  gap: 6px;
-  align-items: center;
-  color: var(--ui-muted);
-  font-size: 12px;
-}
-
-.lo-list {
+.lo-status {
   margin: 0;
-  padding-left: 18px;
-  display: flex;
-  flex-direction: column;
-  gap: 3px;
+  padding: 7px 16px;
+  flex: none;
+  font-size: 12px;
+  border-bottom: 1px solid var(--ui-line);
+  border-left: 3px solid currentColor;
+  background: var(--ui-bg-soft);
   overflow-wrap: anywhere;
 }
 
+.lo-status--ok {
+  color: var(--lo-ok);
+}
+
+.lo-status--error {
+  color: var(--lo-bad);
+}
+
+.lo-status--info {
+  color: var(--lo-info);
+}
+
+/* --- pestañas --------------------------------------------------------------------------------- */
+.lo-tabs {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+.lo-tablist {
+  flex: none;
+  grid-auto-columns: auto;
+}
+
+.lo-tab {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  padding: 0 6px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.lo-tab[aria-selected='true'] {
+  background: var(--ui-accent-soft);
+  color: var(--ui-accent);
+  font-weight: 600;
+  box-shadow: inset 0 0 0 1px rgba(124, 200, 255, 0.35);
+}
+
+.lo-tab__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.lo-tab__count {
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: rgba(160, 176, 210, 0.18);
+  color: var(--ui-text);
+  font: 600 10.5px/16px var(--font-ui);
+  text-align: center;
+}
+
+.lo-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  min-width: 0;
+}
+
+/* --- texto y secciones ------------------------------------------------------------------------ */
+.lo-sec {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.lo-sec__title {
+  font: 600 13px/1.2 var(--font-px);
+  color: var(--ui-accent);
+}
+
 .lo-lead {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
   margin: 0;
   font-weight: 600;
 }
 
-.lo-muted,
-.lo-empty {
+.lo-lead__text {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lo-muted {
   margin: 0;
   color: var(--ui-muted);
   font-size: 12px;
+  overflow-wrap: anywhere;
 }
 
-.lo-card,
-.lo-task {
-  margin: 0 0 8px;
-  padding: 10px 12px;
-  border: 1px solid var(--ui-line);
+.lo-empty {
+  margin: 0;
+  padding: 14px 12px;
+  border: 1px dashed var(--ui-line-strong);
   border-radius: var(--radius-sm);
-  background: var(--ui-bg-soft);
+  color: var(--ui-muted);
+  font-size: 12px;
+  text-align: center;
 }
 
-.lo-task {
+.lo-result {
   display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
-}
-
-.lo-task legend {
-  padding: 0 4px;
-  color: var(--ui-text);
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
 }
 
 .lo-result:empty {
   display: none;
 }
 
-.lo-status {
+/* --- etiquetas -------------------------------------------------------------------------------- */
+.lo-tag {
+  flex: none;
+  padding: 0 6px;
+  border: 1px solid currentColor;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.04);
+  font: 600 10.5px/16px var(--font-ui);
+  white-space: nowrap;
+}
+
+.lo-tag--neutro {
+  color: #aab4c8;
+}
+
+.lo-tag--ok {
+  color: var(--lo-ok);
+}
+
+.lo-tag--info {
+  color: var(--lo-info);
+}
+
+.lo-tag--alerta {
+  color: var(--lo-warn);
+}
+
+.lo-tag--error {
+  color: var(--lo-bad);
+}
+
+/* --- listas, tarjetas y paginador ------------------------------------------------------------- */
+.lo-pages {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lo-list,
+.lo-stack {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
   margin: 0;
-  padding: 8px 18px;
+  padding: 0;
+  list-style: none;
+}
+
+.lo-item {
+  padding: 5px 9px;
+  border: 1px solid var(--ui-line);
+  border-left: 3px solid var(--ui-line-strong);
+  border-radius: var(--radius-sm);
+  background: var(--ui-bg-soft);
+}
+
+.lo-item:hover {
+  border-left-color: var(--ui-accent);
+  background: var(--ui-bg-hover);
+}
+
+.lo-item__head,
+.lo-card__head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.lo-item__title {
+  flex: 1 1 auto;
+  min-width: 0;
   font-size: 12.5px;
-  border-bottom: 1px solid var(--ui-line);
+  font-weight: 500;
+  overflow-wrap: anywhere;
 }
 
-.lo-status--ok {
-  color: var(--lv-ok);
+.lo-item__meta {
+  margin: 1px 0 0;
+  color: var(--ui-muted);
+  font-size: 11.5px;
+  overflow-wrap: anywhere;
 }
 
-.lo-status--error {
-  color: var(--lv-crit);
+.lo-load {
+  padding: 4px 9px;
 }
 
-.lo-status--info {
-  color: var(--ui-accent);
+.lo-load__extra {
+  flex: none;
+  color: var(--ui-muted);
+  font-size: 11px;
 }
 
-@media (max-width: 900px) {
-  .ui-dialog.lo-win {
-    inset: calc(var(--top-h) + var(--gap)) var(--gap) var(--gap) var(--gap);
-    width: auto;
-    max-height: none;
-  }
+.lo-load__total {
+  flex: none;
+  min-width: 96px;
+  text-align: right;
+  font: 600 11.5px/1.3 var(--font-ui);
+  color: var(--ui-text);
+}
+
+.lo-load .ui-progress {
+  margin-top: 4px;
+}
+
+.lo-card,
+.lo-task {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  min-width: 0;
+  margin: 0;
+  padding: 9px 11px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--radius-sm);
+  background: var(--ui-bg-soft);
+}
+
+.lo-card__head {
+  flex-wrap: wrap;
+}
+
+.lo-card__title {
+  margin: 0;
+  font: 600 13.5px/1.3 var(--font-ui);
+  overflow-wrap: anywhere;
+}
+
+.lo-task legend,
+.lo-task__title {
+  padding: 0 5px;
+  color: var(--ui-text);
+  font-size: 12px;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+
+/* Si la página aún es alta, el paginador sigue a la vista al desplazarse. */
+.lo-pager {
+  position: sticky;
+  bottom: -14px;
+  padding: 4px 0;
+  background: var(--lo-win-bg);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.lo-pager__info {
+  color: var(--ui-muted);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lo-pager__btn {
+  border: 1px solid var(--ui-line-strong);
+  background: var(--ui-bg-soft);
+  color: var(--ui-text);
+}
+
+/* --- desplegables y datos --------------------------------------------------------------------- */
+.lo-more {
+  border: 1px solid var(--ui-line);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.18);
+}
+
+.lo-more > summary,
+.lo-more__title {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 5px 9px;
+  color: var(--ui-muted);
+  font-size: 12px;
+  cursor: pointer;
+  list-style: none;
+}
+
+.lo-more > summary::-webkit-details-marker {
+  display: none;
+}
+
+.lo-more > summary::before {
+  content: '';
+  width: 0;
+  height: 0;
+  border: 4px solid transparent;
+  border-left: 6px solid currentColor;
+  border-right-width: 0;
+  transition: transform 0.15s var(--ease);
+}
+
+.lo-more[open] > summary::before {
+  transform: rotate(90deg);
+}
+
+.lo-more > summary:hover {
+  color: var(--ui-text);
+}
+
+.lo-more__body {
+  padding: 2px 9px 9px;
+}
+
+.lo-data {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+  font-size: 12px;
+}
+
+.lo-data__key {
+  color: var(--ui-muted);
+}
+
+.lo-data__value {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.lo-stats {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px;
+}
+
+.lo-stat {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 7px 10px;
+  border: 1px solid var(--ui-line);
+  border-radius: var(--radius-sm);
+  background: var(--ui-bg-soft);
+}
+
+.lo-stat__name,
+.lo-stat__note {
+  color: var(--ui-muted);
+  font-size: 11px;
+}
+
+.lo-stat__value {
+  font: 700 16px/1.25 var(--font-px);
+  color: var(--ui-text);
+}
+
+/* --- formularios ------------------------------------------------------------------------------ */
+.lo-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 10px;
+  align-items: flex-end;
+}
+
+.lo-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+}
+
+.lo-actions--split {
+  justify-content: space-between;
+}
+
+.lo-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+/* Solo en fila: en columna, la base de 110px sería altura y dejaría huecos. */
+.lo-row > .lo-field {
+  flex: 1 1 100px;
+}
+
+.lo-field__label {
+  color: var(--ui-muted);
+  font-size: 11.5px;
+}
+
+.lo-win .lo-input {
+  width: 100%;
+  min-width: 0;
+  height: var(--lo-control-h);
+  padding: 4px 9px;
+  box-sizing: border-box;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: var(--radius-sm);
+  background: rgba(0, 0, 0, 0.25);
+  color: var(--ui-text);
+  font: 12.5px/1.4 var(--font-ui);
+  color-scheme: dark;
+  transition:
+    border-color 0.15s,
+    background-color 0.15s;
+}
+
+.lo-win .lo-input:hover:not(:disabled) {
+  border-color: rgba(160, 176, 210, 0.42);
+}
+
+.lo-win .lo-input:focus-visible {
+  border-color: var(--ui-accent);
+  outline: 2px solid var(--ui-accent);
+  outline-offset: -1px;
+}
+
+.lo-win .lo-input::placeholder {
+  color: var(--ui-faint);
+  opacity: 1;
+}
+
+.lo-win .lo-textarea {
+  height: auto;
+  min-height: 48px;
+  resize: vertical;
+}
+
+.lo-win .lo-textarea:read-only {
+  border-style: dashed;
+  font: 11.5px/1.45 var(--font-mono);
+}
+
+/* Flecha dibujada con degradados: nada incrustado. */
+.lo-win select.lo-select {
+  appearance: none;
+  padding-right: 26px;
+  background-image: linear-gradient(45deg, transparent 50%, var(--ui-muted) 50%), linear-gradient(135deg, var(--ui-muted) 50%, transparent 50%);
+  background-position:
+    right 13px center,
+    right 8px center;
+  background-size: 5px 5px;
+  background-repeat: no-repeat;
+  cursor: pointer;
+}
+
+.lo-win option,
+.lo-option {
+  background: var(--lo-win-bg);
+  color: var(--ui-text);
+}
+
+.lo-check {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
+  min-height: var(--lo-control-h);
+  color: var(--ui-muted);
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.lo-check:hover {
+  color: var(--ui-text);
+}
+
+.lo-check__label {
+  user-select: none;
+}
+
+.lo-win input[type="checkbox"].lo-check__box {
+  appearance: none;
+  display: grid;
+  place-items: center;
+  flex: none;
+  width: 16px;
+  height: 16px;
+  margin: 0;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 4px;
+  background: rgba(0, 0, 0, 0.25);
+  cursor: pointer;
+}
+
+.lo-win input[type="checkbox"].lo-check__box::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 1px;
+  background: transparent;
+}
+
+.lo-win input[type="checkbox"].lo-check__box:checked {
+  border-color: var(--ui-accent);
+  background: var(--ui-accent-soft);
+}
+
+.lo-win input[type="checkbox"].lo-check__box:checked::before {
+  background: var(--ui-accent);
+}
+
+.lo-win .lo-file {
+  height: auto;
+  min-height: var(--lo-control-h);
+  padding: 2px 6px 2px 2px;
+  color: var(--ui-muted);
+  font-size: 11.5px;
+  cursor: pointer;
+}
+
+.lo-win .lo-file::file-selector-button {
+  height: 24px;
+  margin-right: 8px;
+  padding: 0 9px;
+  border: 1px solid var(--ui-line-strong);
+  border-radius: 5px;
+  background: var(--ui-bg-hover);
+  color: var(--ui-text);
+  font: 500 11.5px/1 var(--font-ui);
+  cursor: pointer;
+}
+
+.lo-win .lo-file::file-selector-button:hover {
+  border-color: var(--ui-accent);
+}
+
+/* --- botones ---------------------------------------------------------------------------------- */
+.lo-win .ui-btn {
+  height: 28px;
 }
 
 /* El primario de Habblaud (#2f7fd1 con texto blanco) da 4.13:1; WCAG AA pide 4.5:1 para este tamaño. */
-.lo-win .ui-btn--primary,
-.lo-win .ui-btn--primary:hover {
+.lo-win .ui-btn--primary {
+  padding: 0 14px;
+  font-size: 13.5px;
   background: #2568ad;
-  border-color: #2568ad;
+  border-color: #3f86cf;
+  box-shadow: inset 0 -3px 0 rgba(0, 0, 0, 0.22);
 }
 
-/* Varias ventanas pueden apilarse: fondo opaco para que no se transparente la de abajo. */
-.ui-dialog.lo-win {
-  background: #141821;
+.lo-win .ui-btn--primary:hover {
+  background: #1f5c9b;
+}
+
+.lo-win .ui-btn:disabled,
+.lo-win .ui-icon-btn:disabled,
+.lo-win .lo-input:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.lo-win .ui-btn[aria-busy='true'] {
+  opacity: 0.75;
+  cursor: progress;
+}
+
+/* Pantalla estrecha: marca y controles arriba; las ventanas, en una segunda fila que se desliza. */
+@media (max-width: 900px) {
+  .lo-topbar {
+    flex-wrap: wrap;
+    align-content: center;
+    gap: 6px 8px;
+  }
+
+  .lo-topbar .ui-topbar__right {
+    margin-left: auto;
+  }
+
+  .lo-topbar .lo-nav {
+    order: 9;
+    flex: 1 0 100%;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+
+  .ui-root:has(.lo-topbar) {
+    --top-h: 92px;
+  }
+
+  .ui-dialog.lo-win {
+    inset: auto var(--gap) var(--gap) var(--gap);
+    width: auto;
+    max-height: min(60vh, 480px);
+  }
+
+  .lo-win .lo-input {
+    font-size: 16px; /* iOS no hace zoom al enfocar */
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lo-more > summary::before,
+  .lo-win .lo-input {
+    transition: none;
+  }
 }

@@ -3,7 +3,9 @@
 import type { Task } from "../../api/types";
 import { h } from "../../habblaud/ui/dom";
 import { acciones } from "../acciones";
-import { campo, entrada, lista, pintar, seccion, selector, Ventana } from "../ventana";
+import { fila, paginar, pestanas, type Fila } from "../componentes";
+import { campo, entrada, pintar, selector, Ventana } from "../ventana";
+import { dia, tonoEstado } from "./formato";
 
 const ESTADOS = [
   ["", "Todos"],
@@ -32,9 +34,13 @@ const DIAS = [
   ["30", "30 días"],
 ] as const;
 
-export function lineaTarea(t: Task): string {
-  const partes = [t.title, t.status, t.area ?? "sin área", t.effort === null ? null : `esfuerzo ${t.effort}`, t.due === null ? null : `vence ${t.due}`, t.id];
-  return partes.filter((p): p is string => p !== null).join(" · ");
+export function filaTarea(t: Task): Fila {
+  const detalle = [t.area, t.due === null ? null : `vence ${dia(t.due)}`, t.effort === null ? null : `esfuerzo ${t.effort}`, t.id];
+  return { titulo: t.title, etiquetas: [{ texto: t.status, tono: tonoEstado(t.status) }], detalle: detalle.filter((x): x is string => x !== null).join(" · ") };
+}
+
+function listaTareas(tareas: readonly Task[], vacio: string): HTMLElement {
+  return paginar(tareas, (t) => fila(filaTarea(t)), { porPagina: 4, vacio });
 }
 
 export function crearTareas(refrescar: () => void): Ventana {
@@ -50,7 +56,9 @@ export function crearTareas(refrescar: () => void): Ventana {
 
   async function cargarProximas(): Promise<void> {
     await win.ejecutar(null, async () => {
-      pintar(proximas, lista((await acciones.proximas(Number(dias.value))).map(lineaTarea), "Nada vence en ese plazo."));
+      const t = await acciones.proximas(Number(dias.value));
+      pintar(proximas, listaTareas(t, "Nada vence en ese plazo."));
+      tabs.contador("proximas", t.length);
     });
   }
 
@@ -70,22 +78,23 @@ export function crearTareas(refrescar: () => void): Ventana {
   });
   dias.addEventListener("change", () => void cargarProximas());
 
+  const buscarBtn = win.boton("Buscar", "tareas", async () => {
+    const t = await acciones.tareas({ area: area.value, estado: estado.value, texto: buscar.value.trim() });
+    pintar(resultados, listaTareas(t, "Ninguna tarea coincide."));
+    tabs.contador("buscar", t.length);
+  });
+  buscar.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") buscarBtn.click();
+  });
+
+  const tabs = pestanas("tareas", [
+    { id: "proximas", label: "Próximas", panel: [h("div", { class: "lo-row" }, campo("Plazo", dias), win.boton("Actualizar", "proximas", cargarProximas)), proximas] },
+    { id: "buscar", label: "Buscar", panel: [h("div", { class: "lo-row" }, campo("Área", area), campo("Estado", estado), campo("Texto", buscar), buscarBtn), resultados] },
+  ]);
+
   win.body.append(
-    seccion("Captura rápida", h("div", { class: "lo-row" }, captura, capturar)),
-    seccion(
-      "Buscar tareas",
-      h("div", { class: "lo-row" }, campo("Área", area), campo("Estado", estado), campo("Texto", buscar)),
-      h(
-        "div",
-        { class: "lo-actions" },
-        win.boton("Buscar", "tareas", async () => {
-          const t = await acciones.tareas({ area: area.value, estado: estado.value, texto: buscar.value.trim() });
-          pintar(resultados, lista(t.map(lineaTarea), "Ninguna tarea coincide."));
-        }),
-      ),
-      resultados,
-    ),
-    seccion("Próximos vencimientos", campo("Plazo", dias), h("div", { class: "lo-actions" }, win.boton("Actualizar", "proximas", cargarProximas)), proximas),
+    h("div", { class: "lo-row" }, campo("Captura rápida", captura), capturar),
+    tabs.el,
     h("p", { class: "lo-muted", text: "Para marcar una tarea como hecha o parcial, usa el cierre del día en la oficina del Coach." }),
   );
   return win;

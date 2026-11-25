@@ -87,6 +87,20 @@ describe("oficina del Jefe", () => {
   });
 });
 
+describe("avisos", () => {
+  it("al volver a abrir una ventana no queda el aviso anterior", async () => {
+    installFakeApi({ "GET /api/tareas/proximas": ok([]) });
+    const w = crearTareas(() => undefined);
+    w.open();
+    boton(w, "Capturar").click();
+    await vi.waitFor(() => expect(estado(w)).toBe("Escribe algo para capturar."));
+    w.close();
+    w.open();
+    expect(estado(w)).toBe("");
+    expect(w.el.querySelector<HTMLElement>(".lo-status")?.hidden).toBe(true);
+  });
+});
+
 describe("tu espacio", () => {
   it("la captura se envía, se limpia el campo y el texto de la bóveda nunca se interpreta como HTML", async () => {
     const calls = installFakeApi({
