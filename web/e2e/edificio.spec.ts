@@ -1,10 +1,15 @@
 import AxeBuilder from "@axe-core/playwright";
+import { readFileSync } from "node:fs";
+import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { expect, test, type Page } from "@playwright/test";
 
 // Edificio (F11, ADR-0022/0023): la interfaz de LifeOS contra el backend real (bóveda temporal inventada,
 // lunes 2026-11-02 07:30). Se usa LifeOS entero desde la interfaz de Habblaud y se comprueba con la API
 // que cada acción persiste. Serie: cada prueba parte del estado que deja la anterior.
 test.describe.configure({ mode: "serial" });
+
+const HERE = dirname(fileURLToPath(import.meta.url));
 
 function vigilar(page: Page): string[] {
   const problems: string[] = [];
@@ -58,7 +63,8 @@ test("la oficina del Coach guarda un check-in", async ({ page }) => {
   await page.goto("/");
   const coach = await abrir(page, "coach", "coach");
   await expect(coach).toContainText("plan aprobado");
-  await coach.locator("select").first().selectOption("bloqueado");
+  await coach.getByRole("tab", { name: "Check-in" }).click();
+  await coach.getByLabel("¿Cómo vas?").selectOption("bloqueado");
   await coach.getByRole("button", { name: "Enviar check-in" }).click();
   await expect(coach.locator(".lo-status")).toHaveText("Check-in guardado.");
   expect((await api<{ checkins: number }>(page, "/api/hoy")).checkins).toBe(1);
@@ -79,6 +85,7 @@ test("el cierre se ve antes de aplicarse y se confirma", async ({ page }) => {
   await page.goto("/");
   const coach = await abrir(page, "coach", "coach");
   const confirmar = coach.getByRole("button", { name: "Confirmar cierre" });
+  await coach.getByRole("tab", { name: /Cierre/ }).click();
   await expect(coach.locator(".lo-task").first()).toBeVisible();
   await expect(confirmar).toBeDisabled();
   await coach.locator(".lo-task select").first().selectOption("hecha");
@@ -94,12 +101,90 @@ test("clic en la sala del Jefe abre su oficina; las ventanas de consulta cargan 
   await page.locator("#ui-sidebar").getByText("Oficina del Jefe").first().click();
   await expect(page.locator('dialog[data-ventana="jefe"]')).toBeVisible();
   const historial = await abrir(page, "historial", "historial");
-  await expect(historial).toContainText("publicar plan");
-  await expect(await abrir(page, "indicadores", "indicadores")).toContainText("racha de cierres");
+  await expect(historial).toContainText("Diario/2026-11-02.md");
+  await expect(await abrir(page, "indicadores", "indicadores")).toContainText("Racha de cierres");
   await expect(await abrir(page, "calendario", "calendario")).toContainText("Google Calendar");
-  await expect(await abrir(page, "agentes", "agentes")).toContainText("Agentes del núcleo");
+  await expect(await abrir(page, "agentes", "agentes")).toContainText("Núcleo");
   await expect(await abrir(page, "propuestas", "propuestas")).toContainText("No hay propuestas pendientes.");
   expect(problems).toEqual([]);
+});
+
+const VENTANAS = ["tareas", "jefe", "coach", "agentes", "propuestas", "historial", "indicadores", "calendario"];
+
+test("un especialista se importa, se prueba y se ejecuta desde el edificio, y su propuesta se acepta", async ({ page }) => {
+  const problems = vigilar(page);
+  await page.goto("/");
+  const agentes = await abrir(page, "agentes", "agentes");
+  for (const nombre of ["carrera", "universidad"]) {
+    await agentes.getByRole("tab", { name: "Importar" }).click();
+    await agentes.getByLabel("Nombre").fill(`${nombre}.yaml`);
+    await agentes.getByLabel("Contenido").fill(readFileSync(resolve(HERE, `../../config/especialistas/${nombre}.yaml`), "utf-8"));
+    await agentes.getByRole("button", { name: "Importar" }).click();
+    await expect(agentes.locator(`[data-agente="${nombre}"]`)).toBeVisible(); // muestra la ficha recién importada
+  }
+  const ficha = agentes.locator("[data-agente]");
+  await expect(ficha).toHaveCount(1); // una ficha cada vez
+  await ficha.getByRole("button", { name: "Probar" }).click();
+  await expect(ficha.locator(".lo-card__head")).toContainText("probado");
+  await ficha.getByText("Ciclo de vida").click();
+  await ficha.getByRole("button", { name: "Aprobar" }).click();
+  await expect(ficha.locator(".lo-card__head")).toContainText("aprobado");
+  await ficha.getByText("Ciclo de vida").click();
+  await ficha.getByRole("button", { name: "Activar", exact: true }).click();
+  await expect(ficha.locator(".lo-card__head")).toContainText("activo");
+  await ficha.getByRole("button", { name: "Ejecutar" }).click();
+  await expect(agentes.locator(".lo-status")).toContainText("propuestas escritas");
+  await agentes.getByRole("button", { name: "Página anterior" }).click();
+  await expect(agentes.locator('[data-agente="carrera"]')).toBeVisible();
+
+  // Clic en el agente (no en la barra): solo su ficha, no la lista entera.
+  await agentes.getByRole("button", { name: "Cerrar (Esc)" }).click();
+  await page.locator("#ui-sidebar").getByRole("button", { name: /^Universidad, agente/ }).click();
+  await expect(agentes.locator('[data-agente="universidad"]')).toBeVisible();
+  await expect(agentes.locator("[data-agente]")).toHaveCount(1);
+
+  const propuestas = await abrir(page, "propuestas", "propuestas");
+  const antes = (await api<{ items: unknown[] }>(page, "/api/propuestas")).items.length;
+  expect(antes).toBeGreaterThan(0);
+  await propuestas.getByRole("button", { name: "Aceptar" }).first().click();
+  await expect(propuestas.locator(".lo-status")).toHaveText("Propuesta aceptada.");
+  expect((await api<{ items: unknown[] }>(page, "/api/propuestas")).items.length).toBe(antes - 1);
+  expect(problems).toEqual([]);
+});
+
+test("ninguna ventana ocupa demasiado: compacta y paginada", async ({ page }) => {
+  await page.goto("/");
+  for (const id of VENTANAS) {
+    const win = await abrir(page, id, id);
+    await expect(win.locator(":is(.lo-item, .lo-card, .lo-stat, .lo-empty, .lo-lead):visible").first()).toBeVisible();
+    const caja = await win.boundingBox();
+    expect(caja?.width, id).toBeLessThanOrEqual(420);
+    expect(caja?.height, id).toBeLessThanOrEqual(480);
+    await win.getByRole("button", { name: "Cerrar (Esc)" }).click();
+  }
+  const historial = await abrir(page, "historial", "historial");
+  await expect(historial.locator(".lo-item")).toHaveCount(6);
+  const primera = await historial.locator(".lo-item").first().textContent();
+  await historial.getByRole("button", { name: "Página siguiente" }).click();
+  expect(await historial.locator(".lo-item").first().textContent()).not.toBe(primera);
+});
+
+test("ningún control se queda con el aspecto del navegador", async ({ page }) => {
+  await page.goto("/");
+  for (const id of VENTANAS) {
+    const win = await abrir(page, id, id);
+    const sinEstilo = await win.evaluate((el) =>
+      [...el.querySelectorAll<HTMLElement>("select, input, textarea, button, summary, fieldset")]
+        .filter((c) => {
+          const s = getComputedStyle(c);
+          const nativo = c.matches('select, input[type="checkbox"]') && s.appearance !== "none";
+          const bordeNativo = /outset|inset|groove/.test(s.borderTopStyle);
+          return nativo || bordeNativo || (c.className === "" && c.parentElement?.className === "");
+        })
+        .map((c) => `${c.tagName}.${c.className}`),
+    );
+    expect(sinEstilo, id).toEqual([]);
+  }
 });
 
 test("las ventanas del edificio no tienen problemas graves de accesibilidad", async ({ page }) => {
