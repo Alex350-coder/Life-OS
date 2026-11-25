@@ -41,7 +41,7 @@ export class Barra implements UiComponent {
       { class: "lo-nav", attrs: { "aria-label": "Ventanas de LifeOS" } },
       ...botones.map((b) => {
         const btn = h("button", { class: "ui-btn ui-btn--sm lo-nav__btn", type: "button", title: b.label, attrs: { "data-boton": b.id, ...(b.ruta === undefined ? {} : { "data-ruta": b.ruta }) } });
-        const icon = h("span", { attrs: { "aria-hidden": "true" } });
+        const icon = h("span", { class: "lo-nav__icon", attrs: { "aria-hidden": "true" } });
         setSvg(icon, b.icon);
         btn.append(icon, h("span", { class: "lo-nav__label", text: b.label }));
         btn.addEventListener("click", () => b.onClick(btn));

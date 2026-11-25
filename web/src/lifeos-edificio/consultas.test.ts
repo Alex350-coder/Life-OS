@@ -52,17 +52,16 @@ describe("agentes y especialistas", () => {
     });
     URL.createObjectURL = vi.fn(() => "blob:x");
     URL.revokeObjectURL = vi.fn();
-    Element.prototype.scrollIntoView = vi.fn(); // jsdom no lo implementa
     const w = crearAgentes(() => undefined);
     w.open();
-    await vi.waitFor(() => expect(w.el.textContent).toContain("Lectura · probado · v2"));
-    expect(w.el.textContent).toContain("Jefe · activo");
+    await vi.waitFor(() => expect(w.el.querySelector('[data-agente="lectura"] .lo-card__head')?.textContent).toBe("Lecturaprobadov2universidad"));
+    expect(w.el.textContent).toContain("Semanal#Plan (crear)");
     expect(w.el.textContent).toContain("Total 2026-11: 2 llamada(s)");
     boton(w, "Probar").click();
     await vi.waitFor(() => expect(estado(w)).toContain("prueba registrada"));
     boton(w, "Ejecutar").click();
     await vi.waitFor(() => expect(estado(w)).toContain("propuestas escritas"));
-    expect(w.el.textContent).toContain("Alerta: una alerta");
+    expect(w.el.querySelector(".lo-tag--alerta")?.parentElement?.textContent).toContain("una alerta");
     boton(w, "Activar").click();
     await vi.waitFor(() => expect(estado(w)).toBe("Lectura: activar hecho."));
     boton(w, "Exportar").click();
@@ -73,12 +72,33 @@ describe("agentes y especialistas", () => {
     if (nombre === undefined || contenido === undefined) throw new Error("sin formulario de importación");
     nombre.value = "nuevo";
     contenido.value = "id: nuevo\n";
-    boton(w, "Importar").click();
+    boton(w, "Importar", 1).click(); // el primero es la pestaña
     await vi.waitFor(() => expect(estado(w)).toContain("Importado Nuevo (borrador)"));
     const posts = calls.filter((c) => c.method === "POST").map((c) => c.url);
     expect(posts).toEqual(["/api/agentes/lectura/prueba", "/api/agentes/lectura/ejecucion", "/api/agentes/lectura/estado", "/api/agentes/importacion"]);
     w.enfocar("lectura");
     expect(w.isOpen).toBe(true);
+  });
+
+  it("el resultado de una prueba no se pierde al recargar la ficha", async () => {
+    installFakeApi({ "GET /api/agentes": ok(AGENTES), "GET /api/uso": ok({ month: "2026-11", rows: [], total: ROW, malformed: 0 }), "POST /api/agentes/lectura/prueba": ok({ ...RUN, dry_run: true }) });
+    const w = crearAgentes(() => undefined);
+    w.open();
+    await vi.waitFor(() => expect(w.el.querySelector('[data-agente="lectura"]')).not.toBeNull());
+    const antes = w.el.querySelector('[data-agente="lectura"]');
+    boton(w, "Probar").click();
+    await vi.waitFor(() => expect(w.el.querySelector('[data-agente="lectura"]')).not.toBe(antes)); // se recargó
+    expect(w.el.querySelector('[data-agente="lectura"]')?.textContent).toContain("vence pronto");
+  });
+
+  it("clic en un especialista enseña solo su ficha, aunque los datos lleguen después", async () => {
+    const varios = ["carrera", "hobbies", "lectura"].map((id) => ({ ...SPEC, id, name: id }));
+    installFakeApi({ "GET /api/agentes": ok({ ...AGENTES, imported: varios }), "GET /api/uso": ok({ month: "2026-11", rows: [], total: ROW, malformed: 0 }) });
+    const w = crearAgentes(() => undefined);
+    w.enfocar("hobbies");
+    await vi.waitFor(() => expect(w.el.querySelector("[data-agente]")).not.toBeNull());
+    expect([...w.el.querySelectorAll<HTMLElement>("[data-agente]")].map((e) => e.dataset.agente)).toEqual(["hobbies"]);
+    expect(w.el.querySelector(".lo-pager__info")?.textContent).toBe("hobbies · 2 de 3");
   });
 });
 
@@ -96,7 +116,7 @@ describe("propuestas", () => {
     });
     const w = crearPropuestas(() => undefined);
     w.open();
-    await vi.waitFor(() => expect(w.el.textContent).toContain("Prioridad de Informe: media → alta"));
+    await vi.waitFor(() => expect(w.el.textContent).toContain("Informeprioridadmedia → alta"));
     expect(w.el.textContent).toContain("roto.md");
     boton(w, "Aceptar").click();
     await vi.waitFor(() => expect(w.el.textContent).toContain("No hay propuestas pendientes."));
@@ -110,7 +130,10 @@ describe("historial, indicadores y calendario", () => {
     const w = crearHistorial();
     w.open();
     await vi.waitFor(() => expect(w.el.querySelectorAll(".lo-list li")).toHaveLength(2));
-    expect(w.el.querySelector(".lo-list li")?.textContent).toContain("anexar checkin · Diario/2026-11-02.md · rechazado (sin permiso)");
+    const primera = w.el.querySelector(".lo-list li");
+    expect(primera?.querySelector(".lo-item__title")?.textContent).toBe("anexar checkin");
+    expect(primera?.querySelector(".lo-tag--error")?.textContent).toBe("rechazado");
+    expect(primera?.querySelector(".lo-item__meta")?.textContent).toBe("2026-11-02 13:00 · coach · Diario/2026-11-02.md (sin permiso)");
     expect(w.el.textContent).toContain("Se muestran las 200 más recientes.");
   });
 
@@ -126,9 +149,9 @@ describe("historial, indicadores y calendario", () => {
     installFakeApi({ "GET /api/indicadores": ok(ind) });
     const w = crearIndicadores();
     w.open();
-    await vi.waitFor(() => expect(w.el.textContent).toContain("Entregas: 0 de 0 (sin datos)"));
-    expect(w.el.textContent).toContain("Aceptación de planes: 100 %");
-    expect(w.el.textContent).toContain("Foco: falta el registro");
+    await vi.waitFor(() => expect(w.el.textContent).toContain("Entregassin datos0 de 0"));
+    expect(w.el.textContent).toContain("Aceptación de planes100 %");
+    expect(w.el.textContent).toContain("Focofalta el registro");
   });
 
   it("el calendario es de solo lectura y consulta la disponibilidad", async () => {
@@ -162,9 +185,9 @@ describe("oficina del Jefe", () => {
     const w = crearJefe(refrescar);
     boton(w, "Proponer la semana").click();
     await vi.waitFor(() => expect(estado(w)).toBe("Plan propuesto. Revísalo y apruébalo."));
-    expect(w.el.textContent).toContain("Leer (1 h): sin hueco. muévela");
+    expect(w.el.textContent).toContain("Leer (1 h)sin huecosin hueco. muévela");
     expect(w.el.textContent).toContain("mucha carga");
-    await vi.waitFor(() => expect(w.el.textContent).toContain("¡sobre el límite!"));
+    await vi.waitFor(() => expect(w.el.textContent).toContain("sobre el límite"));
     expect(refrescar).toHaveBeenCalled();
   });
 

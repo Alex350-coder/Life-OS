@@ -33,29 +33,27 @@ export function entrada(placeholder = "", value = ""): HTMLInputElement {
 }
 
 export function texto(rows = 3, placeholder = ""): HTMLTextAreaElement {
-  return h("textarea", { class: "ui-rename__input lo-input", attrs: { rows, placeholder } });
+  return h("textarea", { class: "ui-rename__input lo-input lo-textarea", attrs: { rows, placeholder } });
+}
+
+export function opcion(valor: string, label: string): HTMLOptionElement {
+  return h("option", { class: "lo-option", text: label, attrs: { value: valor } });
 }
 
 export function selector(options: readonly (readonly [string, string])[], value = ""): HTMLSelectElement {
-  const el = h("select", { class: "ui-rename__input lo-input" });
-  for (const [v, label] of options) el.append(h("option", { text: label, attrs: { value: v } }));
+  const el = h("select", { class: "ui-rename__input lo-input lo-select" });
+  for (const [v, label] of options) el.append(opcion(v, label));
   el.value = value;
   return el;
 }
 
 export function casilla(label: string): { el: HTMLElement; input: HTMLInputElement } {
-  const input = h("input", { type: "checkbox" });
-  return { el: h("label", { class: "lo-check" }, input, h("span", { text: label })), input };
-}
-
-/** Lista de líneas de texto (vacía: muestra `empty`). */
-export function lista(items: readonly string[], empty = "Nada que mostrar."): HTMLElement {
-  if (items.length === 0) return h("p", { class: "lo-empty", text: empty });
-  return h("ul", { class: "lo-list" }, ...items.map((t) => h("li", { text: t })));
+  const input = h("input", { class: "lo-check__box", type: "checkbox" });
+  return { el: h("label", { class: "lo-check" }, input, h("span", { class: "lo-check__label", text: label })), input };
 }
 
 export function seccion(titulo: string, ...children: (Node | null)[]): HTMLElement {
-  return h("section", { class: "lo-sec" }, h("h3", { text: titulo }), ...children);
+  return h("section", { class: "lo-sec" }, h("h3", { class: "lo-sec__title", text: titulo }), ...children);
 }
 
 /** Deshabilita un botón de forma que `ejecutar` no lo vuelva a habilitar al terminar. */
@@ -81,7 +79,7 @@ export class Ventana {
     const head = h(
       "div",
       { class: "ui-dialog__head lo-win__head" },
-      h("h2", { text: titulo, attrs: { id: titleId } }),
+      h("h2", { class: "lo-win__title", text: titulo, attrs: { id: titleId } }),
       iconButton(ICONS.close, "Cerrar (Esc)", () => this.close(), "ui-icon-btn--sm"),
     );
     this.status = h("p", { class: "lo-status", role: "status", attrs: { "aria-live": "polite" }, hidden: true });
@@ -107,6 +105,7 @@ export class Ventana {
 
   open(): void {
     if (!this.el.open) {
+      this.aviso(""); // el aviso de la vez anterior ya no viene al caso
       if (typeof this.el.show === "function") this.el.show();
       else this.el.setAttribute("open", "");
     }
